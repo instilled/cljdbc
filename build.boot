@@ -41,10 +41,11 @@
   ;;:deploy-repos {}
   )
 
+(require '[adzerk.boot-test :refer :all])
+
 (task-options!
   pom artifact
-  build-info {:target "instilled/cljdbc/build.info"}
-  test       {:filters #{"'(not (-> % meta :integration))"}})
+  test       {:filters #{'(not (-> % meta :integration))}})
 
 (deftask test1
   "Add test sources and resources to the classpath."
@@ -64,16 +65,16 @@
     :dependencies
     #(conj % '[mysql/mysql-connector-java "5.1.31" :scope "test"]))
   (task-options!
-    test {:filters #{"'(:mysql (into #{} (meta %)))"}}))
+    test {:filters #{'(-> % meta :mysql)}}))
 
 (deftask oracle
   "Add oracle to the classpath."
   []
   (set-env!
     :dependencies
-    #(conj % '[org.oracle/ojdbc6 "11.2.0.4" :scope "test"]))
+    #(conj % '[org.oracle/ojdbc7 "12.1.0.2" :scope "test"]))
   (task-options!
-    test {:filters #{"'(:oracle (into #{} (meta %)))"}}))
+    test {:filters #{'(-> % meta :oracle)}}))
 
 (replace-task!
   [t test]    (fn [& xs] (comp (test1) (apply t xs))))
