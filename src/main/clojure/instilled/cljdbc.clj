@@ -9,30 +9,54 @@
 
 ;; TODO: remove dependency to clojure.java.jdbc
 
-(defrecord QuerySpec [sql params-idx options])
+(defprotocol IExecutionAspect
+  (pre [conn query-spec params])
+  (post [conn query-spec rs]))
 
-
-;; #######################################
-;; Prepared statement
+(defrecord QuerySpec [sql params-idx options meta])
 
 (defn parse-statement
   "Parse a possibly parametrized sql-string into `QuerySpec`.
    Both, named and sequential params, are supported. Params
    must be prefixed with `:`, e.g. `:?` (positional)
    `:named-param` (named)."
-  [^String sql-str options]
-  (let [^java.util.regex.Matcher m (re-matcher #":(\w+(-|_)\w+|\w+|\?)" sql-str)]
-    (loop [i 1 params-idx nil]
-      (if-let [f (and (.find m) (.group m 1))]
-        (recur
-          (inc i)
-          (update
-            params-idx
-            (keyword f)
-            #(if (vector? %1) (conj %1 %2) [%2])
-            i))
-        (QuerySpec. (.replaceAll m "?") params-idx options)))))
+  ([^String sql-str]
+   (parse-statement nil sql-str))
+  ([options ^String sql-str]
+   (letfn [(extract-table-name
+             [op sql-str]
+             (case op
+               :update (second (re-find #"(?i)update\s+(.*?)(\s+.*)?$" sql-str))
+               :insert (second (re-find #"(?i)into\s+(.*?)(\s+.*)?$" sql-str))
+               :delete (second (re-find #"(?i)from\s+(.*?)(\s+.*)?$" sql-str))
+               :select (second (re-find #"(?i)from\s+(.*?)(\s+.*)?$" sql-str))
+               (throw
+                 (IllegalStateException.
+                   (format "Failed to extract table name from sql: %s"
+                     sql-str)))))]
+     (let [^java.util.regex.Matcher m (re-matcher #":(\w+(-|_)\w+|\w+|\?)" sql-str)
+           op (if-let [type (first (re-find #"(?mi)^(update|delete|insert|select)" sql-str))]
+                (-> type .toLowerCase keyword)
+                (throw
+                  (IllegalStateException.
+                    (format "Unsupported sql query type! Expecting either select, insert, update, or delete. SQL: %s"
+                      sql-str))))
+           table (extract-table-name op sql-str)
+           meta  {:op op :table table}]
+       (loop [i 1 params-idx nil]
+         (if-let [f (and (.find m) (.group m 1))]
+           (recur
+             (inc i)
+             (update
+               params-idx
+               (keyword f)
+               #(if (vector? %1) (conj %1 %2) [%2])
+               i))
+           (QuerySpec. (.replaceAll m "?") params-idx options meta)))))))
 
+
+;; #######################################
+;; PreparedSatement
 
 (def ^{:private true}
   result-set-concurrency
@@ -51,17 +75,17 @@
    :scroll-sensitive ResultSet/TYPE_SCROLL_SENSITIVE})
 
 (defn set-prepared-statement-params!
-  "Set the `stmnt`'s `params` based on `query-spec`."
-  [^PreparedStatement stmnt query-spec params]
+  "Set the `stmt`'s `params` based on `query-spec`."
+  [^PreparedStatement stmt query-spec params]
   (doseq [[k ixs] (:params-idx query-spec) ix ixs]
-    (jdbc/set-parameter (get params k) stmnt ix))
-  stmnt)
+    (jdbc/set-parameter (get params k) stmt ix))
+  stmt)
 
 (defn set-prepared-statement-options!
-  [^PreparedStatement stmnt {:keys [fetch-size max-rows timeout] :as  options}]
-  (when fetch-size (.setFetchSize stmnt fetch-size))
-  (when max-rows (.setMaxRows stmnt max-rows))
-  (when timeout (.setQueryTimeout stmnt timeout)))
+  [^PreparedStatement stmt {:keys [fetch-size max-rows timeout] :as  options}]
+  (when fetch-size (.setFetchSize stmt fetch-size))
+  (when max-rows (.setMaxRows stmt max-rows))
+  (when timeout (.setQueryTimeout stmt timeout)))
 
 (defn create-prepared-statement
   "Create prepared statement. Currently defers to `clojure.java.jdbc/prepare-statement`."
@@ -81,18 +105,18 @@
   "Collect results after an execute query (update, insert, delete). May return
    auto-increment values for insert operations (if `return-keys == true` and
    supported by driver) or err to `cnt`."
-  [^PreparedStatement stmnt cnt {:keys [return-keys return-keys-naming-strategy] :as options}]
+  [^PreparedStatement stmt cnt {:keys [return-keys return-keys-naming-strategy] :as options}]
   (let [return-keys-naming-strategy (or return-keys-naming-strategy str/lower-case)
         ;; may or may not be supported by vendors
-        ret-ks  (^{:once true} fn* [stmnt alt-ret]
+        ret-ks  (^{:once true} fn* [stmt alt-ret]
                  (try
-                   (let [rs (.getGeneratedKeys stmnt)]
+                   (let [rs (.getGeneratedKeys stmt)]
                      (doall (jdbc/result-set-seq rs {:identifiers return-keys-naming-strategy})))
                    (catch Exception ex
                      (throw ex)
                      alt-ret)))
-        ret-cnt (^{:once true} fn* [stmnt alt-ret] alt-ret)]
-    ((if return-keys ret-ks ret-cnt) stmnt cnt)))
+        ret-cnt (^{:once true} fn* [stmt alt-ret] alt-ret)]
+    ((if return-keys ret-ks ret-cnt) stmt cnt)))
 
 
 ;; #######################################
@@ -102,12 +126,12 @@
   "Query the database given `query-spec`."
   [conn query-spec & [params options]]
   (jdbc/with-db-connection [conn conn]
-    (let [stmnt (create-prepared-statement conn query-spec options)]
+    (let [stmt (create-prepared-statement conn query-spec options)]
       (try
-        (let [stmnt (set-prepared-statement-params! stmnt query-spec params)]
-          (jdbc/query conn [stmnt] (or options {})))
+        (let [stmt (set-prepared-statement-params! stmt query-spec params)]
+          (jdbc/query conn [stmt] (or options {})))
         (finally
-          (.close stmnt))))))
+          (.close stmt))))))
 
 (defn execute!
   "Run an execute a query (insert, update, delete) against the dabase.
@@ -115,21 +139,21 @@
   [conn query-spec & [params {:keys [return-keys] :as options}]]
   (jdbc/with-db-connection [conn conn]
     (let [options (merge (:options query-spec) options)
-          ^PreparedStatement stmnt (create-prepared-statement conn query-spec options)]
+          ^PreparedStatement stmt (create-prepared-statement conn query-spec options)]
       (try
         (if (vector? params)
           (do
             (doseq [params params]
-              (set-prepared-statement-params! stmnt query-spec params)
-              (.addBatch stmnt))
-            (let [cnt (into [] (.executeBatch stmnt))]
-              (collect-result stmnt cnt options)))
+              (set-prepared-statement-params! stmt query-spec params)
+              (.addBatch stmt))
+            (let [cnt (into [] (.executeBatch stmt))]
+              (collect-result stmt cnt options)))
           (do
-            (set-prepared-statement-params! stmnt query-spec params)
-            (let [cnt (.executeUpdate stmnt)]
-              (collect-result stmnt cnt options))))
+            (set-prepared-statement-params! stmt query-spec params)
+            (let [cnt (.executeUpdate stmt)]
+              (collect-result stmt cnt options))))
         (finally
-          (.close stmnt))))))
+          (.close stmt))))))
 
 (defn insert!
   "Insert record(s) into the database. If `(= true (:return-keys options))`

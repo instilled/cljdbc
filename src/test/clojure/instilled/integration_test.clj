@@ -120,6 +120,7 @@
           [{:name "Earth"}
            {:name "???"}])))))
 
+;;s.getConnection().getMetaData().getDriverMajorVersion()
 (deftest ^:integration ^:mysql test-mysql-crud
   (let [conn (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s"
                (or (env :db.mysql.host) "localhost")
