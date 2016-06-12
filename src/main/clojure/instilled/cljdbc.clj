@@ -15,6 +15,10 @@
 
 (defrecord QuerySpec [sql params-idx options meta])
 
+(defn insert?
+  [query-spec]
+  (= :insert (get-in query-spec [:meta :op])))
+
 (defn parse-statement
   "Parse a possibly parametrized sql-string into `QuerySpec`.
    Both, named and sequential params, are supported. Params
@@ -58,42 +62,85 @@
 ;; #######################################
 ;; PreparedSatement
 
-(def ^{:private true}
+(def ^{:const true :private true :from "clojure.java.jdbc"}
   result-set-concurrency
   {:read-only ResultSet/CONCUR_READ_ONLY
    :updatable ResultSet/CONCUR_UPDATABLE})
 
-(def ^{:private true}
+(def ^{:const true :private true :from "clojure.java.jdbc"}
   result-set-holdability
   {:hold ResultSet/HOLD_CURSORS_OVER_COMMIT
    :close ResultSet/CLOSE_CURSORS_AT_COMMIT})
 
-(def ^{:private true}
+(def ^{:const true :private true :from "clojure.java.jdbc"}
   result-set-type
   {:forward-only ResultSet/TYPE_FORWARD_ONLY
    :scroll-insensitive ResultSet/TYPE_SCROLL_INSENSITIVE
    :scroll-sensitive ResultSet/TYPE_SCROLL_SENSITIVE})
 
-(defn set-prepared-statement-params!
+(defn ^{:from "clojure.java.jdbc"} set-prepared-statement-params!
   "Set the `stmt`'s `params` based on `query-spec`."
   [^PreparedStatement stmt query-spec params]
   (doseq [[k ixs] (:params-idx query-spec) ix ixs]
     (jdbc/set-parameter (get params k) stmt ix))
   stmt)
 
-(defn set-prepared-statement-options!
-  [^PreparedStatement stmt {:keys [fetch-size max-rows timeout] :as  options}]
-  (when fetch-size (.setFetchSize stmt fetch-size))
-  (when max-rows (.setMaxRows stmt max-rows))
-  (when timeout (.setQueryTimeout stmt timeout)))
-
 (defn create-prepared-statement
-  "Create prepared statement. Currently defers to `clojure.java.jdbc/prepare-statement`."
-  [conn query-spec options]
-  (jdbc/prepare-statement
-    (jdbc/db-find-connection conn)
-    (:sql query-spec)
-    (or options {})))
+  "Create a prepared statement from a connection, a SQL string and a map
+   of options:
+     :return-keys truthy | nil - default nil
+       for some drivers, this may be a vector of column names to identify
+       the generated keys to return, otherwise it should just be true
+     :result-type :forward-only | :scroll-insensitive | :scroll-sensitive
+     :concurrency :read-only | :updatable
+     :cursors
+     :fetch-size n
+     :max-rows n
+     :timeout n"
+  [conn {{return-keys :return-keys
+          result-type :result-type
+          concurrency :concurrency
+          cursors     :cursors
+          fetch-size  :fetch-size
+          max-rows    :max-rows
+          timeout     :timeout} :options
+         :as query-spec}]
+  #_(jdbc/prepare-statement
+      (jdbc/db-find-connection conn)
+      (:sql query-spec)
+      (or options {}))
+  (let [^PreparedStatement stmt
+        (cond
+          (insert? query-spec)
+          (cond
+            (-> return-keys first string?)
+            (.prepareStatement conn (:sql-str query-spec) (into-array String return-keys))
+
+            (-> return-keys first number?)
+            (.prepareStatement conn (:sql-str query-spec) (into-array Integer return-keys))
+
+            return-keys
+            (.prepareStatement conn (:sql-str query-spec) java.sql.Statement/RETURN_GENERATED_KEYS)
+
+            :else
+            (.prepareStatement conn (:sql-str query-spec)))
+
+          (and result-type concurrency)
+          (if cursors
+            (.prepareStatement conn (:sql-str query-spec)
+              (get result-set-type result-type result-type)
+              (get result-set-concurrency concurrency concurrency)
+              (get result-set-holdability cursors cursors))
+            (.prepareStatement conn (:sql-str query-spec)
+              (get result-set-type result-type result-type)
+              (get result-set-concurrency concurrency concurrency)))
+
+          :else
+          (.prepareStatement conn (:sql-str query-spec)))]
+    (when fetch-size (.setFetchSize stmt fetch-size))
+    (when max-rows (.setMaxRows stmt max-rows))
+    (when timeout (.setQueryTimeout stmt timeout))
+    stmt))
 
 
 ;; ########################################
@@ -138,8 +185,8 @@
    May return auto-increment keys."
   [conn query-spec & [params {:keys [return-keys] :as options}]]
   (jdbc/with-db-connection [conn conn]
-    (let [options (merge (:options query-spec) options)
-          ^PreparedStatement stmt (create-prepared-statement conn query-spec options)]
+    (let [query-spec (update query-spec :options merge options)
+          ^PreparedStatement stmt (create-prepared-statement conn query-spec)]
       (try
         (if (vector? params)
           (do
@@ -147,11 +194,11 @@
               (set-prepared-statement-params! stmt query-spec params)
               (.addBatch stmt))
             (let [cnt (into [] (.executeBatch stmt))]
-              (collect-result stmt cnt options)))
+              (collect-result stmt query-spec cnt)))
           (do
             (set-prepared-statement-params! stmt query-spec params)
             (let [cnt (.executeUpdate stmt)]
-              (collect-result stmt cnt options))))
+              (collect-result stmt query-spec cnt))))
         (finally
           (.close stmt))))))
 
