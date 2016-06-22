@@ -25,8 +25,8 @@
    must be prefixed with `:`, e.g. `:?` (positional)
    `:named-param` (named)."
   ([^String sql-str]
-   (parse-statement nil sql-str))
-  ([options ^String sql-str]
+   (parse-statement sql-str nil))
+  ([^String sql-str options ]
    (letfn [(extract-table-name
              [op sql-str]
              (case op
@@ -85,7 +85,7 @@
     (jdbc/set-parameter (get params k) stmt ix))
   stmt)
 
-(defn create-prepared-statement
+(defn ^{:from "clojure.java.jdbc"} create-prepared-statement
   "Create a prepared statement from a connection, a SQL string and a map
    of options:
      :return-keys truthy | nil - default nil
@@ -97,46 +97,48 @@
      :fetch-size n
      :max-rows n
      :timeout n"
-  [conn {{return-keys :return-keys
-          result-type :result-type
-          concurrency :concurrency
-          cursors     :cursors
-          fetch-size  :fetch-size
-          max-rows    :max-rows
-          timeout     :timeout} :options
-         :as query-spec}]
-  #_(jdbc/prepare-statement
-      (jdbc/db-find-connection conn)
-      (:sql query-spec)
-      (or options {}))
-  (let [^PreparedStatement stmt
+  [conn
+   {{return-keys :return-keys
+     result-type :result-type
+     concurrency :concurrency
+     cursors     :cursors
+     fetch-size  :fetch-size
+     max-rows    :max-rows
+     timeout     :timeout} :options
+    :as query-spec}]
+  (let [conn (jdbc/db-find-connection conn)
+        ^PreparedStatement stmt
         (cond
           (insert? query-spec)
           (cond
             (-> return-keys first string?)
-            (.prepareStatement conn (:sql-str query-spec) (into-array String return-keys))
+            (do
+              (.prepareStatement conn (:sql query-spec) (into-array String return-keys)))
 
             (-> return-keys first number?)
-            (.prepareStatement conn (:sql-str query-spec) (into-array Integer return-keys))
+            (do
+              (.prepareStatement conn (:sql query-spec) (into-array Integer return-keys)))
 
             return-keys
-            (.prepareStatement conn (:sql-str query-spec) java.sql.Statement/RETURN_GENERATED_KEYS)
+            (do
+              (.prepareStatement conn (:sql query-spec) java.sql.Statement/RETURN_GENERATED_KEYS))
 
             :else
-            (.prepareStatement conn (:sql-str query-spec)))
+            (do
+              (.prepareStatement conn (:sql query-spec))))
 
           (and result-type concurrency)
           (if cursors
-            (.prepareStatement conn (:sql-str query-spec)
+            (.prepareStatement conn (:sql query-spec)
               (get result-set-type result-type result-type)
               (get result-set-concurrency concurrency concurrency)
               (get result-set-holdability cursors cursors))
-            (.prepareStatement conn (:sql-str query-spec)
+            (.prepareStatement conn (:sql query-spec)
               (get result-set-type result-type result-type)
               (get result-set-concurrency concurrency concurrency)))
 
           :else
-          (.prepareStatement conn (:sql-str query-spec)))]
+          (.prepareStatement conn (:sql query-spec)))]
     (when fetch-size (.setFetchSize stmt fetch-size))
     (when max-rows (.setMaxRows stmt max-rows))
     (when timeout (.setQueryTimeout stmt timeout))
@@ -152,7 +154,11 @@
   "Collect results after an execute query (update, insert, delete). May return
    auto-increment values for insert operations (if `return-keys == true` and
    supported by driver) or err to `cnt`."
-  [^PreparedStatement stmt cnt {:keys [return-keys return-keys-naming-strategy] :as options}]
+  [^PreparedStatement stmt
+   {{return-keys :return-keys
+     return-keys-naming-strategy :return-keys-naming-strategy} :options
+    :as query-spec}
+   cnt]
   (let [return-keys-naming-strategy (or return-keys-naming-strategy str/lower-case)
         ;; may or may not be supported by vendors
         ret-ks  (^{:once true} fn* [stmt alt-ret]
@@ -173,7 +179,8 @@
   "Query the database given `query-spec`."
   [conn query-spec & [params options]]
   (jdbc/with-db-connection [conn conn]
-    (let [stmt (create-prepared-statement conn query-spec options)]
+    (let [query-spec (update query-spec :options merge options)
+          stmt (create-prepared-statement conn query-spec)]
       (try
         (let [stmt (set-prepared-statement-params! stmt query-spec params)]
           (jdbc/query conn [stmt] (or options {})))
