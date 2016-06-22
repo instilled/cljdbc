@@ -5,9 +5,31 @@
   (:import
     [java.sql
      ResultSet
-     PreparedStatement]))
+     PreparedStatement
+     Connection
+     DriverManager]))
 
 ;; TODO: remove dependency to clojure.java.jdbc
+
+(defprotocol IConnectionAware
+  (get-connection
+    [this]
+    "Retrieve the connection. Based on the exending type this may result
+     in new connections each time the function is being invoked. It is
+     strongly recommended to pass a `javax.sql.DataSource` object to all
+     functions taking a `conn`."))
+
+(extend-type String
+  IConnectionAware
+  (get-connection
+    [this]
+    (DriverManager/getConnection this)))
+
+(extend-type javax.sql.DataSource
+  IConnectionAware
+  (get-connection
+    [this]
+    (.getConnection ^javax.sql.DataSource this)))
 
 (defprotocol IExecutionAspect
   (pre [conn query-spec params])
@@ -15,9 +37,13 @@
 
 (defrecord QuerySpec [sql params-idx options meta])
 
-(defn insert?
+(defn execute?
   [query-spec]
-  (= :insert (get-in query-spec [:meta :op])))
+  (case (get-in query-spec [:meta :op])
+    :update true
+    :insert true
+    :execute true
+    false))
 
 (defn parse-statement
   "Parse a possibly parametrized sql-string into `QuerySpec`.
@@ -59,8 +85,18 @@
            (QuerySpec. (.replaceAll m "?") params-idx options meta)))))))
 
 
-;; #######################################
-;; PreparedSatement
+;; ########################################
+;; ops
+
+(defmacro with-connection
+  "Evaluates body in the context of an active connection to the database.
+   (with-connection [con-db db-spec]
+     ... con-db ...)"
+  [binding & body]
+  (let [conn-var (first binding)]
+    `(let [spec# ~(second binding)]
+       (with-open [~conn-var (get-connection spec#)]
+         ~@body))))
 
 (def ^{:const true :private true :from "clojure.java.jdbc"}
   result-set-concurrency
@@ -97,7 +133,7 @@
      :fetch-size n
      :max-rows n
      :timeout n"
-  [conn
+  [^Connection conn
    {{return-keys :return-keys
      result-type :result-type
      concurrency :concurrency
@@ -106,10 +142,9 @@
      max-rows    :max-rows
      timeout     :timeout} :options
     :as query-spec}]
-  (let [conn (jdbc/db-find-connection conn)
-        ^PreparedStatement stmt
+  (let [^PreparedStatement stmt
         (cond
-          (insert? query-spec)
+          (execute? query-spec)
           (cond
             (-> return-keys first string?)
             (do
@@ -145,9 +180,6 @@
     stmt))
 
 
-;; ########################################
-;; ops
-
 ;; https://leanpub.com/high-performance-java-persistence/read#leanpub-auto-retrieving-auto-generated-keys
 ;; http://stackoverflow.com/questions/19022175/executebatch-method-return-array-of-value-2-in-java
 (defn collect-result
@@ -178,7 +210,7 @@
 (defn query
   "Query the database given `query-spec`."
   [conn query-spec & [params options]]
-  (jdbc/with-db-connection [conn conn]
+  (with-connection [conn conn]
     (let [query-spec (update query-spec :options merge options)
           stmt (create-prepared-statement conn query-spec)]
       (try
@@ -191,7 +223,7 @@
   "Run an execute a query (insert, update, delete) against the dabase.
    May return auto-increment keys."
   [conn query-spec & [params {:keys [return-keys] :as options}]]
-  (jdbc/with-db-connection [conn conn]
+  (with-connection [conn conn]
     (let [query-spec (update query-spec :options merge options)
           ^PreparedStatement stmt (create-prepared-statement conn query-spec)]
       (try

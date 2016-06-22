@@ -122,14 +122,15 @@
 
 ;;s.getConnection().getMetaData().getDriverMajorVersion()
 (deftest ^:integration ^:mysql test-mysql-crud
-  (let [conn (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s"
+  (let [;; running in docker
+        conn (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s"
                (or (env :db.mysql.host) "localhost")
                (or (env :db.mysql.port) "3306")
                (or (env :db.mysql.name) "cljdbc")
                (or (env :db.mysql.user) "cljdbc")
                (or (env :db.mysql.pass) "cljdbc"))]
     (jdbc/db-do-commands
-      conn
+      {:connection (get-connection conn)}
       ["DROP TABLE IF EXISTS planet"
        "CREATE TABLE planet (
          id     BIGINT NOT NULL AUTO_INCREMENT,
@@ -145,19 +146,14 @@
       ["delete from planet where name = :name"])))
 
 (deftest ^:integration ^:oracle test-oracle-crud
-  (let [conn (format "jdbc:oracle:thin:%s/%s@%s:%s:xe"
+  (let [;; running in docker
+        conn (format "jdbc:oracle:thin:%s/%s@%s:%s:xe"
                (or (env :db.oracle.user) "cljdbc")
                (or (env :db.oracle.pass) "cljdbc")
-               (or (env :db.oracle.host) "192.168.99.100")
-               (or (env :db.oracle.port) "49161"))
-        conn {:classname   "oracle.jdbc.OracleDriver"
-              :subprotocol "oracle"
-              :subname     (format "thin:@%s:49161:xe"
-                             (or (env :db.oracle.host) "192.168.99.100"))
-              :user        "system"
-              :password    "oracle"}]
+               (or (env :db.oracle.host) "localhost")
+               (or (env :db.oracle.port) "49161"))]
     (jdbc/db-do-commands
-      conn
+      {:connection (get-connection conn)}
       [;;"delete planet"
        "BEGIN
              EXECUTE IMMEDIATE 'DROP TABLE planet CASCADE CONSTRAINTS PURGE';
