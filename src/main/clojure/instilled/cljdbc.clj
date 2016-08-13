@@ -213,20 +213,21 @@
       {:savepoints (list)
        :depth (int -1)})))
 
-(defn make-connection-pooled
+(defn ^:private connection-pool-type
+  [options]
+  (cond
+    (:hikari options)
+    :hikari
+
+    (:c3p0 options)
+    :c3p0
+
+    (:tomcatPool options)
+    :tomcatPool))
+
+(defn ^:private make-connection-pool
   [jdbc-url options]
-  (let [impl (cond
-               (:hikari options)
-               :hikari
-
-               (:c3p0 options)
-               :c3p0
-
-               (:tomcatPool options)
-               :tomcatPool
-
-               :else
-               (throw (IllegalStateException. "Unsupported connection-pool!")))
+  (let [impl (connection-pool-type options)
         ns (->> impl
                 (name)
                 (str "instilled.cljdbc.cp.")
@@ -245,11 +246,9 @@
   [spec {:keys [transaction-strategy] :as options}]
   (cond
     (and (string? spec)
-         (or (:hikari options)
-             (:c3p0 options)
-             (:tomcatPool options)))
+         (connection-pool-type options))
     (DataSourceBackedCljdbcConnection.
-      (make-connection-pooled spec options)
+      (make-connection-pool spec options)
       nil)
 
     (instance? javax.sql.DataSource spec)
