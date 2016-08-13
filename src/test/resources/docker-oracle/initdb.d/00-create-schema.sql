@@ -1,0 +1,79 @@
+-- >>> START
+-- VAR for easy access
+DEFINE my_schema_name = 'cljdbc' (CHAR)
+
+-- CREATE SCHEMA
+CREATE USER &my_schema_name IDENTIFIED BY cljdbc ;
+
+-- USER SQL
+ALTER USER &my_schema_name
+DEFAULT TABLESPACE "USERS"
+TEMPORARY TABLESPACE "TEMP"
+ACCOUNT UNLOCK ;
+
+-- QUOTAS
+
+-- ROLES
+
+-- SYSTEM PRIVILEGES
+GRANT CREATE JOB TO &my_schema_name ;
+GRANT MANAGE FILE GROUP TO &my_schema_name ;
+GRANT ALTER PROFILE TO &my_schema_name ;
+GRANT CREATE ASSEMBLY TO &my_schema_name ;
+GRANT CREATE ROLE TO &my_schema_name ;
+GRANT CREATE LIBRARY TO &my_schema_name ;
+GRANT DROP ROLLBACK SEGMENT TO &my_schema_name ;
+GRANT CREATE TRIGGER TO &my_schema_name ;
+GRANT ADMINISTER DATABASE TRIGGER TO &my_schema_name ;
+GRANT DEBUG CONNECT SESSION TO &my_schema_name ;
+GRANT ALTER SESSION TO &my_schema_name ;
+GRANT CREATE MATERIALIZED VIEW TO &my_schema_name ;
+GRANT CREATE DIMENSION TO &my_schema_name ;
+GRANT AUDIT SYSTEM TO &my_schema_name ;
+GRANT CREATE OPERATOR TO &my_schema_name ;
+GRANT CREATE INDEXTYPE TO &my_schema_name ;
+GRANT CREATE MEASURE FOLDER TO &my_schema_name ;
+GRANT CREATE VIEW TO &my_schema_name ;
+GRANT CREATE SESSION TO &my_schema_name ;
+GRANT CREATE RULE TO &my_schema_name ;
+GRANT BECOME USER TO &my_schema_name ;
+GRANT CREATE TABLE TO &my_schema_name ;
+GRANT EXECUTE ASSEMBLY TO &my_schema_name ;
+GRANT MANAGE TABLESPACE TO &my_schema_name ;
+GRANT CREATE TYPE TO &my_schema_name ;
+GRANT CREATE TABLESPACE TO &my_schema_name ;
+GRANT CREATE EVALUATION CONTEXT TO &my_schema_name ;
+GRANT ADVISOR TO &my_schema_name ;
+GRANT CREATE PUBLIC DATABASE LINK TO &my_schema_name ;
+GRANT CREATE ROLLBACK SEGMENT TO &my_schema_name ;
+GRANT ALTER USER TO &my_schema_name ;
+GRANT QUERY REWRITE TO &my_schema_name ;
+GRANT CREATE PUBLIC SYNONYM TO &my_schema_name ;
+GRANT GLOBAL QUERY REWRITE TO &my_schema_name ;
+GRANT ADMINISTER RESOURCE MANAGER TO &my_schema_name ;
+GRANT CREATE SYNONYM TO &my_schema_name ;
+GRANT ON COMMIT REFRESH TO &my_schema_name ;
+GRANT CREATE SEQUENCE TO &my_schema_name ;
+GRANT ADMINISTER SQL TUNING SET TO &my_schema_name ;
+GRANT RESTRICTED SESSION TO &my_schema_name ;
+GRANT CREATE USER TO &my_schema_name ;
+GRANT CREATE CUBE BUILD PROCESS TO &my_schema_name ;
+GRANT CREATE PROFILE TO &my_schema_name ;
+GRANT ALTER TABLESPACE TO &my_schema_name ;
+GRANT EXPORT FULL DATABASE TO &my_schema_name ;
+GRANT IMPORT FULL DATABASE TO &my_schema_name ;
+GRANT CREATE DATABASE LINK TO &my_schema_name ;
+GRANT CHANGE NOTIFICATION TO &my_schema_name ;
+GRANT CREATE MINING MODEL TO &my_schema_name ;
+GRANT DROP PROFILE TO &my_schema_name ;
+GRANT CREATE RULE SET TO &my_schema_name ;
+GRANT MANAGE SCHEDULER TO &my_schema_name ;
+GRANT FORCE TRANSACTION TO &my_schema_name ;
+GRANT DROP PUBLIC DATABASE LINK TO &my_schema_name ;
+GRANT UNLIMITED TABLESPACE TO &my_schema_name ;
+GRANT ADMINISTER SQL MANAGEMENT OBJECT TO &my_schema_name ;
+GRANT RESUMABLE TO &my_schema_name ;
+GRANT CREATE PROCEDURE TO &my_schema_name ;
+GRANT DROP TABLESPACE TO &my_schema_name ;
+GRANT ALTER ROLLBACK SEGMENT TO &my_schema_name ;
+-- <<< END
