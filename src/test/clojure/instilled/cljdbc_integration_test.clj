@@ -1,4 +1,4 @@
-(ns instilled.cljdbc.integration-test
+(ns instilled.cljdbc-integration-test
   (:require
     [instilled.cljdbc  :refer :all]
     [clojure.string    :as    str]
@@ -22,7 +22,18 @@
     (or (System/getProperty kstr)
         (System/getenv (-> kstr (.replaceAll "(\\.|-)" "_") (.toUpperCase))))))
 
-(defn test-crud
+(defn ^:private crud-queries
+  [ & [return-keys-naming-strategy]]
+  (let [return-keys-naming-strategy
+        (or return-keys-naming-strategy
+            (fn [_] :id))]
+    [["insert into planet (system, name, mass) values (:system,:name,:mass)"
+      {:return-keys-naming-strategy return-keys-naming-strategy}]
+     ["select * from planet where system = :system"]
+     ["update planet set name = :to-name where system = :system and name = :name"]
+     ["delete from planet where name = :name"]]))
+
+(defn basic-crud
   [conn [c co] [r ro] [u uo] [d do]]
   (testing "query"
     (testing "cursors"
@@ -44,7 +55,7 @@
         (is (= "System 99"
                (-> rs last :system)))))))
 
-#_(defn test-crud
+#_(defn extended-crud
     [conn [c co] [r ro] [u uo] [d do]]
     (testing "create"
       (let [qs (parse-statement c co)]
@@ -142,28 +153,19 @@
             [{:name "Earth"}
              {:name "???"}])))))
 
-(defn ^:private crud-queries
-  [ & [return-keys-naming-strategy]]
-  (let [return-keys-naming-strategy
-        (or return-keys-naming-strategy
-            (fn [_] :id))]
-    [["insert into planet (system, name, mass) values (:system,:name,:mass)"
-      {:return-keys-naming-strategy return-keys-naming-strategy}]
-     ["select * from planet where system = :system"]
-     ["update planet set name = :to-name where system = :system and name = :name"]
-     ["delete from planet where name = :name"]]))
-
 ;;s.getConnection().getMetaData().getDriverMajorVersion()
 (deftest ^:integration ^:mysql test-mysql-crud
   (let [;; running in docker
-        conn (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s"
-               (or (env :db.mysql.host) "localhost")
-               (or (env :db.mysql.port) "3306")
-               (or (env :db.mysql.name) "cljdbc")
-               (or (env :db.mysql.user) "cljdbc")
-               (or (env :db.mysql.pass) "cljdbc"))]
+        conn (make-connection
+               (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s"
+                 (or (env :db.mysql.host) "localhost")
+                 (or (env :db.mysql.port) "3306")
+                 (or (env :db.mysql.name) "cljdbc")
+                 (or (env :db.mysql.user) "cljdbc")
+                 (or (env :db.mysql.pass) "cljdbc"))
+               {:hikari {}})]
     (jdbc/db-do-commands
-      {:connection (get-connection conn)}
+      {:connection (get-connection conn nil)}
       ["DROP TABLE IF EXISTS planet"
        "CREATE TABLE planet (
          id     BIGINT NOT NULL AUTO_INCREMENT,
@@ -171,17 +173,19 @@
          name   VARCHAR(30) NOT NULL,
          mass   DECIMAL(65,30) NOT NULL,
          PRIMARY KEY (id))"])
-    (apply test-crud conn (crud-queries))))
+    (apply basic-crud conn (crud-queries))))
 
 (deftest ^:integration ^:oracle test-oracle-crud
   (let [;; running in docker
-        conn (format "jdbc:oracle:thin:%s/%s@%s:%s:xe"
-               (or (env :db.oracle.user) "cljdbc")
-               (or (env :db.oracle.pass) "cljdbc")
-               (or (env :db.oracle.host) "localhost")
-               (or (env :db.oracle.port) "49161"))]
+        conn (make-connection
+               (format "jdbc:oracle:thin:%s/%s@%s:%s:xe"
+                 (or (env :db.oracle.user) "cljdbc")
+                 (or (env :db.oracle.pass) "cljdbc")
+                 (or (env :db.oracle.host) "localhost")
+                 (or (env :db.oracle.port) "49161"))
+               {:hikari {}})]
     (jdbc/db-do-commands
-      {:connection (get-connection conn)}
+      {:connection (get-connection conn nil)}
       [;;"delete planet"
        "BEGIN
              EXECUTE IMMEDIATE 'DROP TABLE planet CASCADE CONSTRAINTS PURGE';
@@ -207,4 +211,4 @@
                  INTO   :new.id
                  FROM   dual;
                END;"])
-    (apply test-crud conn (crud-queries))))
+    (apply basic-crud conn (crud-queries))))

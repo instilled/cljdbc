@@ -1,7 +1,6 @@
 (ns instilled.cljdbc
   (:require
-    [clojure.string         :as str]
-    #_[clojure.java.jdbc      :as jdbc])
+    [clojure.string         :as str])
   (:import
     [java.sql
      ResultSet
@@ -9,7 +8,6 @@
      Connection
      DriverManager]))
 
-;; TODO: remove dependency to clojure.java.jdbc
 
 ;; ########################################
 ;; Protos and proto exts
@@ -17,26 +15,10 @@
 (defrecord QuerySpec
   [sql params-idx options meta])
 
-(defprotocol IConnectionAware
-  (get-connection
-    [this]
-    "Retrieve the connection. Based on the exending type this may result
-     in new connections each time the function is being invoked. It is
-     strongly recommended to pass a `javax.sql.DataSource` object to all
-     functions taking a `conn`."))
-
-(extend-type String
-  IConnectionAware
-  (get-connection
-    [this]
-    (DriverManager/getConnection this)))
-
-(extend-type javax.sql.DataSource
-  IConnectionAware
-  (get-connection
-    [this]
-    (.getConnection ^javax.sql.DataSource this)))
-
+(defprotocol ITransactionStrategy
+  (begin! [this ^Connection conn options])
+  (commit! [this ^Connection conn])
+  (rollback! [this ^Connection conn]))
 
 (defprotocol IExecutionAspect
   (pre-insert [conn query-spec params])
@@ -51,7 +33,7 @@
   (pre-update [conn query-spec params])
   (post-update [conn query-spec params]))
 
-(defprotocol ISQLValue
+(defprotocol ^{:from "clojure.java.jdbc"} ISQLValue
   "Protocol for creating SQL values from Clojure values. Default
    implementations (for Object and nil) just return the argument,
    but it can be extended to provide custom behavior to support
@@ -65,7 +47,7 @@
   nil
   (sql-value [_] nil))
 
-(defprotocol ISQLParameter
+(defprotocol ^{:from "clojure.java.jdbc"} ISQLParameter
   "Protocol for setting SQL parameters in statement objects, which
    can convert from Clojure values. The default implementation just
    delegates the conversion to ISQLValue's sql-value conversion and
@@ -84,7 +66,7 @@
   (set-parameter [_ ^PreparedStatement s ^long i]
     (.setObject s i (sql-value nil))))
 
-(defprotocol IResultSetReadColumn
+(defprotocol ^{:from "clojure.java.jdbc"} IResultSetReadColumn
   "Protocol for reading objects from the java.sql.ResultSet. Default
    implementations (for Object and nil) return the argument, and the
    Boolean implementation ensures a canonicalized true/false value,
@@ -101,6 +83,221 @@
 
   nil
   (result-set-read-column [_1 _2 _3] nil))
+
+(def ^{:private true :doc "Transaction isolation levels."}
+  isolation-levels
+  {:none             java.sql.Connection/TRANSACTION_NONE
+   :read-committed   java.sql.Connection/TRANSACTION_READ_COMMITTED
+   :read-uncommitted java.sql.Connection/TRANSACTION_READ_UNCOMMITTED
+   :repeatable-read  java.sql.Connection/TRANSACTION_REPEATABLE_READ
+   :serializable     java.sql.Connection/TRANSACTION_SERIALIZABLE})
+
+(def ^{:const true :private true :from "clojure.java.jdbc"}
+  result-set-concurrency
+  {:read-only ResultSet/CONCUR_READ_ONLY
+   :updatable ResultSet/CONCUR_UPDATABLE})
+
+(def ^{:const true :private true :from "clojure.java.jdbc"}
+  result-set-holdability
+  {:hold ResultSet/HOLD_CURSORS_OVER_COMMIT
+   :close ResultSet/CLOSE_CURSORS_AT_COMMIT})
+
+(def ^{:const true :private true :from "clojure.java.jdbc"}
+  result-set-type
+  {:forward-only ResultSet/TYPE_FORWARD_ONLY
+   :scroll-insensitive ResultSet/TYPE_SCROLL_INSENSITIVE
+   :scroll-sensitive ResultSet/TYPE_SCROLL_SENSITIVE})
+
+(defprotocol ICljdbcConnection
+  (close
+    [this])
+  (get-connection
+    [this options])
+  (get-transaction
+    [this]))
+
+(defrecord StringBackedCljdbcConnection
+  [conn transaction]
+  ICljdbcConnection
+  (close
+    [this]
+    (.close @conn))
+  (get-connection
+    [this options]
+    conn)
+  (get-transaction
+    [this]
+    transaction))
+
+(defrecord DataSourceBackedCljdbcConnection
+  [ds transaction]
+  ICljdbcConnection
+  (close
+    [this]
+    ;; not necessary
+    )
+  (get-connection
+    [this options]
+    (.getConnection ds))
+  (get-transaction
+    [this]))
+
+(defrecord DefaultTransactionStrategy
+  [ctx]
+  ITransactionStrategy
+  (begin!
+    [this conn options]
+    (let [{:keys [isolation read-only?]} options
+          {:keys [savepoints depth]} ctx]
+      (cond
+        ;; Transaction start
+        (= -1 depth)
+        (let [cur-ctx (merge
+                        ctx
+                        {:auto-commit (.getAutoCommit conn)
+                         :isolation   (.getTransactionIsolation conn)
+                         :read-only?  (.isReadOnly conn)})]
+          (.setAutoCommit conn false)
+          (when isolation
+            (.setTransactionIsolation conn (get isolation-levels isolation)))
+          (when read-only?
+            (.setReadOnly conn true))
+          cur-ctx)
+
+        :else
+        (vswap!
+          ctx
+          (fn [ctx sp]
+            (-> ctx
+                (update :depth inc)
+                (update :savepoints conj sp))
+            (.setSavepoint conn))))
+      this))
+  (commit!
+    [this conn]
+    (let [{:keys [read-only? isolation auto-commit savepoints depth]} @ctx]
+      (if read-only?
+        (rollback! this conn)
+        (.commit this))
+      (cond
+        ;; outermost transaction
+        (= 0 depth)
+        (do
+          ;; reset state
+          (.setTransactionIsolation conn isolation)
+          (.setReadOnly conn read-only?)
+          (.setAutoCommit conn auto-commit))
+
+        ;; inner transaction - nothing to do
+        :else
+        (do
+          ;; inner transaction
+          ;; nothing to do really
+          ))
+      this))
+  (rollback!
+    [this conn]
+    (let [{:keys [savepoints depth]} @ctx]
+      (cond
+        (and (< 0 depth)
+             (< 0 (count transient)))
+        (let [[sp & rest] savepoints]
+          (.rollback conn (last savepoints))
+          (vswap! ctx (fn [ctx sp]))
+          this)))))
+
+(defn make-default-transaction-strategy
+  []
+  (DefaultTransactionStrategy.
+    (volatile!
+      {:savepoints (list)
+       :depth (int -1)})))
+
+(defn make-connection-pooled
+  [jdbc-url options]
+  (let [impl (cond
+               (:hikari options)
+               :hikari
+
+               (:c3p0 options)
+               :c3p0
+
+               (:tomcatPool options)
+               :tomcatPool
+
+               :else
+               (throw (IllegalStateException. "Unsupported connection-pool!")))
+        ns (->> impl
+                (name)
+                (str "instilled.cljdbc.cp.")
+                (symbol))]
+    (eval `(do ~(require ns)))
+    (let [pool-factory (ns-resolve ns 'make-pool)]
+      (when-not pool-factory
+        (throw
+          (IllegalStateException.
+            (str "Connection pool could not be loaded! `make-pool` not found in ns: " (name ns)))))
+      (pool-factory jdbc-url (get options impl)))))
+
+(defn make-connection
+  "Make a connection. Use `make-default-transaction-strategy` if
+   not provided through as `:transaction-strategy` in `options`."
+  [spec {:keys [transaction-strategy] :as options}]
+  (cond
+    (and (string? spec)
+         (or (:hikari options)
+             (:c3p0 options)
+             (:tomcatPool options)))
+    (DataSourceBackedCljdbcConnection.
+      (make-connection-pooled spec options)
+      nil)
+
+    (instance? javax.sql.DataSource spec)
+    (DataSourceBackedCljdbcConnection.
+      (DriverManager/getConnection spec)
+      nil)
+
+    (string? spec)
+    (StringBackedCljdbcConnection.
+      (DriverManager/getConnection spec)
+      nil)
+
+    :else
+    (throw
+      (IllegalStateException.
+        (str "Unsupported `spec` provided to `make-connection`!")))))
+
+(defn ^:private make-connection-transactional
+  [conn {:keys [transaction-strategy]}]
+  (if (get-transaction conn)
+    conn
+    (assoc
+      conn
+      (or transaction-strategy (make-default-transaction-strategy)))))
+
+(defn do-transactionally
+  [conn options f]
+  (when-not (satisfies? ICljdbcConnection conn)
+    (throw
+      (IllegalStateException.
+        "Can not start a transaction on non ICljdbcConnection type! See (get-connection).")))
+  (let [transaction-strategy (get-transaction conn)
+        ^Connection conn* (get-connection conn options)]
+    (try
+      (begin! transaction-strategy conn* options)
+      (let [result (f conn)]
+        (commit! transaction-strategy conn*)
+        result)
+      (catch Throwable t
+        (rollback! transaction-strategy conn*)
+        (throw t)))))
+
+(defmacro with-transaction
+  [binding options & body]
+  (let [conn-var (first binding)
+        f `(fn [~conn-var] (do ~@body))]
+    `(let [~conn-var (make-connection-transactional ~(second binding))]
+       (do-transactionally ~(first binding) ~options ~f))))
 
 (defn dml?
   "Whether or not `query-spec` is a DML statement (update,
@@ -166,31 +363,15 @@
 
 (defmacro with-connection
   "Evaluates body in the context of an active connection to the database.
-   (with-connection [con-db db-spec]
+   (with-connection [conn conn]
      ... con-db ...)"
   [binding & body]
   (let [conn-var (first binding)]
     `(let [spec# ~(second binding)]
-       (with-open [~conn-var (get-connection spec#)]
+       (with-open [~conn-var (get-connection spec# nil)]
          ~@body))))
 
-(def ^{:const true :private true :from "clojure.java.jdbc"}
-  result-set-concurrency
-  {:read-only ResultSet/CONCUR_READ_ONLY
-   :updatable ResultSet/CONCUR_UPDATABLE})
-
-(def ^{:const true :private true :from "clojure.java.jdbc"}
-  result-set-holdability
-  {:hold ResultSet/HOLD_CURSORS_OVER_COMMIT
-   :close ResultSet/CLOSE_CURSORS_AT_COMMIT})
-
-(def ^{:const true :private true :from "clojure.java.jdbc"}
-  result-set-type
-  {:forward-only ResultSet/TYPE_FORWARD_ONLY
-   :scroll-insensitive ResultSet/TYPE_SCROLL_INSENSITIVE
-   :scroll-sensitive ResultSet/TYPE_SCROLL_SENSITIVE})
-
-(defn ^{:from "clojure.java.jdbc"} set-prepared-statement-params!
+(defn set-prepared-statement-params!
   "Set the `stmt`'s `params` based on `query-spec`."
   [^PreparedStatement stmt query-spec params]
   (doseq [[k ixs] (:params-idx query-spec) ix ixs]
@@ -312,32 +493,31 @@
 (defn query
   "Query the database given `query-spec`."
   [conn query-spec & [params options]]
-  (with-connection [conn conn]
-    (with-open [stmt (prepare-query conn query-spec params options)
-                rs   (.executeQuery stmt)]
-      (doall (result-set-seq rs)))))
+  (with-open [stmt (prepare-query (get-connection conn options) query-spec params options)
+              rs   (.executeQuery stmt)]
+    (doall (result-set-seq rs))))
 
 (defn execute!
   "Run an DML query (insert, update, delete) against the dabase.
    May return auto-increment keys."
   [conn query-spec & [params {:keys [return-keys] :as options}]]
-  (with-connection [conn conn]
-    (let [query-spec (update query-spec :options merge options)
-          ^PreparedStatement stmt (create-prepared-statement conn query-spec)]
-      (try
-        (if (vector? (first params))
-          (do
-            (doseq [params params]
-              (set-prepared-statement-params! stmt query-spec params)
-              (.addBatch stmt))
-            (let [cnt (into [] (.executeBatch stmt))]
-              (collect-result stmt query-spec cnt)))
-          (do
+  (let [query-spec (update query-spec :options merge options)]
+    (with-open
+      [^PreparedStatement stmt (create-prepared-statement (get-connection conn options) query-spec)]
+      ;; TODO: better cond
+      (if (and (vector? params)
+               (or (map? (first params))
+                   (vector? (first params))))
+        (do
+          (doseq [params params]
             (set-prepared-statement-params! stmt query-spec params)
-            (let [cnt (.executeUpdate stmt)]
-              (collect-result stmt query-spec cnt))))
-        (finally
-          (.close stmt))))))
+            (.addBatch stmt))
+          (let [cnt (into [] (.executeBatch stmt))]
+            (collect-result stmt query-spec cnt)))
+        (do
+          (set-prepared-statement-params! stmt query-spec params)
+          (let [cnt (.executeUpdate stmt)]
+            (collect-result stmt query-spec cnt)))))))
 
 (defn insert!
   "Insert record(s) into the database. If `(= true (:return-keys options))`

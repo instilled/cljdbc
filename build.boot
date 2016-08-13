@@ -22,6 +22,9 @@
   :dependencies
   '[[org.clojure/java.jdbc                           "0.5.8"]
 
+    ;; provided
+    [com.zaxxer/HikariCP                             "2.4.5"
+     :scope "provided"]
     [org.clojure/clojure                             "1.8.0"
      :scope "provided"]
 
