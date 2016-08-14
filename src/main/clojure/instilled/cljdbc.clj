@@ -291,7 +291,7 @@
         (rollback! transaction-strategy conn*)
         (throw t)))))
 
-(defmacro with-transaction
+(defmacro transactionally
   [binding options & body]
   (let [conn-var (first binding)
         f `(fn [~conn-var] (do ~@body))]
