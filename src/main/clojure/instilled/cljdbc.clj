@@ -6,7 +6,9 @@
      ResultSet
      PreparedStatement
      Connection
-     DriverManager]))
+     DriverManager]
+    [javax.sql
+     DataSource]))
 
 
 ;; ########################################
@@ -113,72 +115,90 @@
     [this])
   (get-connection
     [this options])
+  (lift-connection
+    [this])
   (get-transaction
     [this]))
 
-(defrecord StringBackedCljdbcConnection
+(defrecord CljdbcProxyStringDataSource
   [conn transaction]
   ICljdbcConnection
   (close
     [this]
-    (.close @conn))
+    (.close conn))
   (get-connection
     [this options]
+    conn)
+  (lift-connection
+    [this]
     conn)
   (get-transaction
     [this]
     transaction))
 
-(defrecord DataSourceBackedCljdbcConnection
-  [ds transaction]
+(defrecord CljdbcProxyDataSource
+  [^DataSource ds active-connection transaction]
   ICljdbcConnection
   (close
     [this]
-    ;; not necessary
-    )
+    (.close ds))
   (get-connection
     [this options]
-    (.getConnection ds))
+    ;; TODO: allow nested connections?
+    (if active-connection
+      this
+      (assoc this
+        :active-connection (.getConnection ds))))
+  (lift-connection
+    [this]
+    (when-not active-connection
+      (throw (IllegalStateException.
+               "Boom! No active connection. Body shuold usually be wrapped in `with-connection`.")))
+    active-connection)
   (get-transaction
-    [this]))
+    [this]
+    transaction))
 
 (defrecord DefaultTransactionStrategy
   [ctx]
   ITransactionStrategy
   (begin!
     [this conn options]
-    (let [{:keys [isolation read-only?]} options
-          {:keys [savepoints depth]} ctx]
-      (cond
-        ;; Transaction start
-        (= -1 depth)
-        (let [cur-ctx (merge
-                        ctx
-                        {:auto-commit (.getAutoCommit conn)
-                         :isolation   (.getTransactionIsolation conn)
-                         :read-only?  (.isReadOnly conn)})]
-          (.setAutoCommit conn false)
-          (when isolation
-            (.setTransactionIsolation conn (get isolation-levels isolation)))
-          (when read-only?
-            (.setReadOnly conn true))
-          cur-ctx)
+    (vswap!
+      ctx
+      (fn [cur new] new)
+      (let [{:keys [savepoints depth] :as ctx*} @ctx]
+        (cond
+          ;; Transaction start
+          (= -1 depth)
+          (do
+            (let [{:keys [isolation read-only?]} options
+                  new-ctx (merge
+                            ctx*
+                            {:depth 0
+                             :auto-commit (.getAutoCommit conn)
+                             :isolation   (.getTransactionIsolation conn)
+                             :read-only?  (.isReadOnly conn)})]
+              (.setAutoCommit conn false)
+              (when isolation
+                (.setTransactionIsolation conn (get isolation-levels isolation isolation)))
+              (when read-only?
+                (.setReadOnly conn true))
+              new-ctx))
 
-        :else
-        (vswap!
-          ctx
-          (fn [ctx sp]
-            (-> ctx
+          ;; Nested transaction
+          :else
+          (let [sp (.setSavepoint conn)]
+            (-> ctx*
                 (update :depth inc)
-                (update :savepoints conj sp))
-            (.setSavepoint conn))))
-      this))
+                (update :savepoints conj sp))))))
+    this)
   (commit!
     [this conn]
     (let [{:keys [read-only? isolation auto-commit savepoints depth]} @ctx]
       (if read-only?
         (rollback! this conn)
-        (.commit this))
+        (.commit conn))
       (cond
         ;; outermost transaction
         (= 0 depth)
@@ -225,7 +245,7 @@
     (:tomcatPool options)
     :tomcatPool))
 
-(defn ^:private make-connection-pool
+(defn ^:private make-pooled-datasource
   [jdbc-url options]
   (let [impl (connection-pool-type options)
         ns (->> impl
@@ -240,39 +260,41 @@
             (str "Connection pool could not be loaded! `make-pool` not found in ns: " (name ns)))))
       (pool-factory jdbc-url (get options impl)))))
 
-(defn make-connection
+(defn make-datasource
   "Make a connection. Use `make-default-transaction-strategy` if
    not provided through as `:transaction-strategy` in `options`."
   [spec {:keys [transaction-strategy] :as options}]
   (cond
     (and (string? spec)
          (connection-pool-type options))
-    (DataSourceBackedCljdbcConnection.
-      (make-connection-pool spec options)
+    (CljdbcProxyDataSource.
+      (make-pooled-datasource spec options)
+      nil
       nil)
 
     (instance? javax.sql.DataSource spec)
-    (DataSourceBackedCljdbcConnection.
-      (DriverManager/getConnection spec)
+    (CljdbcProxyDataSource.
+      spec
+      nil
       nil)
 
     (string? spec)
-    (StringBackedCljdbcConnection.
+    (CljdbcProxyStringDataSource.
       (DriverManager/getConnection spec)
       nil)
 
     :else
     (throw
       (IllegalStateException.
-        (str "Unsupported `spec` provided to `make-connection`!")))))
+        (str "Unsupported `spec` provided to `make-datasource`!")))))
 
-(defn ^:private make-connection-transactional
-  [conn {:keys [transaction-strategy]}]
+(defn bind-transaction
+  [conn {:keys [transaction-strategy] :as options}]
   (if (get-transaction conn)
     conn
-    (assoc
-      conn
-      (or transaction-strategy (make-default-transaction-strategy)))))
+    (assoc conn
+      :transaction (or transaction-strategy
+                       (make-default-transaction-strategy)))))
 
 (defn do-transactionally
   [conn options f]
@@ -280,23 +302,16 @@
     (throw
       (IllegalStateException.
         "Can not start a transaction on non ICljdbcConnection type! See (get-connection).")))
-  (let [transaction-strategy (get-transaction conn)
-        ^Connection conn* (get-connection conn options)]
+  (let [conn* (lift-connection conn)
+        transaction (get-transaction conn)]
     (try
-      (begin! transaction-strategy conn* options)
-      (let [result (f conn)]
-        (commit! transaction-strategy conn*)
+      (begin! transaction conn* options)
+      (let [result (f)]
+        (commit! transaction conn*)
         result)
       (catch Throwable t
-        (rollback! transaction-strategy conn*)
+        (rollback! transaction conn*)
         (throw t)))))
-
-(defmacro transactionally
-  [binding options & body]
-  (let [conn-var (first binding)
-        f `(fn [~conn-var] (do ~@body))]
-    `(let [~conn-var (make-connection-transactional ~(second binding))]
-       (do-transactionally ~(first binding) ~options ~f))))
 
 (defn dml?
   "Whether or not `query-spec` is a DML statement (update,
@@ -360,16 +375,6 @@
 ;; ########################################
 ;; ops
 
-(defmacro with-connection
-  "Evaluates body in the context of an active connection to the database.
-   (with-connection [conn conn]
-     ... con-db ...)"
-  [binding & body]
-  (let [conn-var (first binding)]
-    `(let [spec# ~(second binding)]
-       (with-open [~conn-var (get-connection spec# nil)]
-         ~@body))))
-
 (defn set-prepared-statement-params!
   "Set the `stmt`'s `params` based on `query-spec`."
   [^PreparedStatement stmt query-spec params]
@@ -411,18 +416,50 @@
 
           (and result-type concurrency)
           (if cursors
-            (.prepareStatement conn (:sql query-spec)
-              (get result-set-type result-type result-type)
-              (get result-set-concurrency concurrency concurrency)
-              (get result-set-holdability cursors cursors))
-            (.prepareStatement conn (:sql query-spec)
-              (get result-set-type result-type result-type)
-              (get result-set-concurrency concurrency concurrency)))
+            (do
+              (when-not (and (get result-set-type result-type)
+                             (get result-set-concurrency concurrency)
+                             (get result-set-holdability cursors))
+                (throw
+                  (IllegalArgumentException.
+                    (str "Unsupported result-set-type, result-set-concurrency, or result-set-holdability, is: "
+                      (select-keys query-spec [:result-type :concurrency :cursors])))))
+              (.prepareStatement conn (:sql query-spec)
+                (get result-set-type result-type)
+                (get result-set-concurrency concurrency)
+                (get result-set-holdability cursors)))
+            (do
+              (when-not (and (get result-set-type result-type)
+                             (get result-set-concurrency concurrency)
+                             (get result-set-holdability cursors))
+                (throw
+                  (IllegalArgumentException.
+                    (str "Unsupported result-set-type, or result-set-concurrency, is: "
+                      (select-keys query-spec [:result-type :concurrency])))))
+              (.prepareStatement conn (:sql query-spec)
+                (get result-set-type result-type result-type)
+                (get result-set-concurrency concurrency concurrency))))
+
           :else
           (.prepareStatement conn (:sql query-spec)))]
-    (when fetch-size (.setFetchSize stmt fetch-size))
-    (when max-rows (.setMaxRows stmt max-rows))
-    (when timeout (.setQueryTimeout stmt timeout))
+    (when fetch-size
+      (when (< fetch-size 0)
+        (throw
+          (IllegalArgumentException.
+            (str "Unsupported fetch-size. Expecting >= 0, is: " fetch-size))))
+      (.setFetchSize stmt fetch-size))
+    (when max-rows
+      (when (< max-rows 0)
+        (throw
+          (IllegalArgumentException.
+            (str "Unsupported max-rows. Expecting >= 0, is: " max-rows))))
+      (.setMaxRows stmt max-rows))
+    (when timeout
+      (when (< timeout 0)
+        (throw
+          (IllegalArgumentException.
+            (str "Unsupported timeout, Expecting >= 0, is: " timeout))))
+      (.setQueryTimeout stmt timeout))
     stmt))
 
 (defn result-set-seq
@@ -479,6 +516,41 @@
 ;; #######################################
 ;; Public API
 
+(defmacro with-connection
+  "Evaluates body in the context of an active connection to the database.
+   (with-connection [conn conn]
+     ... con-db ...)"
+  [binding & body-and-or-options]
+  (let [conn-var (first binding)
+        [options body] (if (map? (first body-and-or-options))
+                         [(first body-and-or-options) (rest body-and-or-options)]
+                         [{} body-and-or-options])]
+    `(let [spec# ~(second binding)
+           ~conn-var (get-connection spec# ~options)]
+       (with-open [conn# (lift-connection ~conn-var)]
+         ~@body))))
+
+(defmacro transactionally
+  "Transactionally executes body.
+
+   Reuse existing connection or create a new one if none exists, similar
+   to `with-connection`.
+
+   See also `with-connection`."
+  [binding & body-and-or-options]
+  (let [conn-var (first binding)
+        ;;[options body] (if-not body [nil options])
+        [options body] (if (map? (first body-and-or-options))
+                         [(first body-and-or-options) (rest body-and-or-options)]
+                         [{} body-and-or-options])]
+    `(let [~conn-var (-> ~(second binding)
+                         (get-connection ~options)
+                         (bind-transaction ~options))]
+       (with-open [conn# (lift-connection ~conn-var)]
+         (do-transactionally
+           ~conn-var ~options
+           (fn [] ~@body))))))
+
 (defn prepare-query
   "Query the database given `query-spec`. Return the open `ResultSet`.
    Usually you would use `query` or `with-query-rs` functions."
@@ -490,7 +562,7 @@
 (defn query
   "Query the database given `query-spec`."
   [conn query-spec & [params options]]
-  (with-open [stmt (prepare-query (get-connection conn options) query-spec params options)
+  (with-open [stmt (prepare-query (lift-connection conn) query-spec params options)
               rs   (.executeQuery stmt)]
     (doall (result-set-seq rs {}))))
 
@@ -500,7 +572,7 @@
   [conn query-spec & [params {:keys [return-keys] :as options}]]
   (let [query-spec (update query-spec :options merge options)]
     (with-open
-      [^PreparedStatement stmt (create-prepared-statement (get-connection conn options) query-spec)]
+      [^PreparedStatement stmt (create-prepared-statement (lift-connection conn) query-spec)]
       ;; TODO: better cond
       (if (and (vector? params)
                (or (map? (first params))

@@ -88,4 +88,5 @@
     test {:filters #{'(-> % meta :oracle)}}))
 
 (replace-task!
-  [t test]    (fn [& xs] (comp (test1) (apply t xs))))
+  [t test] (fn [& xs] (comp (test1) (apply t xs)))
+  [r repl] (fn [& xs] (comp (test1) (apply r xs))))
