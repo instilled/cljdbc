@@ -27,6 +27,14 @@
      :scope "provided"]
     [org.clojure/clojure                             "1.8.0"
      :scope "provided"]
+    [org.slf4j/slf4j-api                             "1.7.21"
+     :scope "provided"]
+    [org.apache.logging.log4j/log4j-slf4j-impl       "2.6.2"
+     :scope "provided"]
+    [org.apache.logging.log4j/log4j-core             "2.6.2"
+     :scope "provided"]
+    [org.apache.logging.log4j/log4j-api              "2.6.2"
+     :scope "provided"]
 
     ;; test dependencies
     [adzerk/boot-test                                "1.1.1"
