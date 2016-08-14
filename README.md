@@ -4,7 +4,7 @@ An opinonated JDBC wrapper for clojure inspired by `clojure.java.jdbc` and
 funcool's `clojure.jdbc`. It uses `PreparedStatement`s for most of the
 queries and adds further capabilities for named parameters as does `yesql`.
 Named & positional parameters syntax is aliged to Spring's syntax.
-It aims at simplicity and easy of use and shuold "just work".
+It aims at simplicity and easy of use and should "just work".
 
 Some things are still WIP but other than that query & dml, transaction support
 and connection pools work well.

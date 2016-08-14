@@ -124,36 +124,70 @@
               {}
               {:timeout -100}))))))
 
-(defn assert-transaction-state
-  [conn state]
-  (is (= state
-         (-> (jdbc/get-transaction conn)
-             :ctx (deref)
-             (select-keys (keys state))))))
-
 (defn transaction-tests
   [ds]
-  (testing "transaction"
-    (testing "without options"
+  (letfn [(transaction-state
+            [conn]
+            (-> (jdbc/get-transaction conn)
+                :ctx (deref)))
+          (savepoint-count
+            [conn]
+            (-> (jdbc/get-transaction conn)
+                :ctx
+                (deref)
+                :savepoints
+                (count)))]
+    (testing "transaction"
+      (jdbc/with-connection [conn ds]
+        (testing "without options"
+          (jdbc/transactionally [conn conn]
+            (= {:read-only? false
+                :auto-commit true
+                :savepoints (list)
+                :depth 0}
+               (-> (transaction-state conn)
+                   (select-keys [:read-only? :auto-commit
+                                 :savepoints :depth])))))
+        (testing "with options"
+          (jdbc/transactionally [conn conn] {:read-only? true}
+            (= {:auto-commit true
+                :savepoints (list)
+                :depth 0}
+               (-> (transaction-state conn)
+                   (select-keys [:auto-commit :savepoints :depth])))
+            (is (= true
+                   (-> (jdbc/lift-connection conn)
+                       (.isReadOnly))))))
+        (testing "illegal option values throw"
+          (is (thrown?
+                IllegalArgumentException
+                (jdbc/transactionally [conn conn] {:isolation :wrong}))))))
+
+    (testing "nested transaction"
       (jdbc/with-connection [conn ds]
         (jdbc/transactionally [conn conn]
-          (assert-transaction-state conn
-            {:read-only? false
-             :auto-commit true
-             :savepoints (list)
-             :depth 0}))))
-    (testing "with options"
-      (jdbc/transactionally [conn ds] {:read-only? true}
-        (assert-transaction-state conn
-          {:auto-commit true
-           :savepoints (list)
-           :depth 0})
-        (is (= true
-               (.isReadOnly (jdbc/lift-connection conn))))))
-    (testing "illegal option values throw"
-      (is (thrown?
-            IllegalArgumentException
-            (jdbc/transactionally [conn ds] {:isolation :wrong})))))
-  #_(testing "nested transaction"
-
-      ))
+          (is (= {:auto-commit true
+                  :savepoints (list)
+                  :depth 0}
+                 (-> (transaction-state conn)
+                     (select-keys [:auto-commit :savepoints :depth]))))
+          (jdbc/transactionally [conn conn]
+            (is (= {:auto-commit true
+                    :depth 1}
+                   (-> (transaction-state conn)
+                       (select-keys [:auto-commit :depth]))))
+            (is (= 1
+                   (savepoint-count conn)))
+            (jdbc/transactionally [conn conn]
+              (is (= {:depth 2}
+                     (-> (transaction-state conn)
+                         (select-keys [:depth]))))
+              (is (= 2
+                     (savepoint-count conn))))
+            (is (= 1
+                   (savepoint-count conn))))
+          (is (= {:auto-commit true
+                  :savepoints (list)
+                  :depth 0}
+                 (-> (transaction-state conn)
+                     (select-keys [:auto-commit :savepoints :depth])))))))))

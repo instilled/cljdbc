@@ -199,32 +199,59 @@
       (if read-only?
         (rollback! this conn)
         (.commit conn))
-      (cond
-        ;; outermost transaction
-        (= 0 depth)
-        (do
-          ;; reset state
-          (.setTransactionIsolation conn isolation)
-          (.setReadOnly conn read-only?)
-          (.setAutoCommit conn auto-commit))
+      (vswap!
+        ctx
+        (fn [old new] new)
+        (cond
+          ;; outermost transaction
+          (= 0 depth)
+          (do
+            ;; reset state
+            (.setTransactionIsolation conn isolation)
+            (.setReadOnly conn read-only?)
+            (.setAutoCommit conn auto-commit)
+            (assoc @ctx
+              :depth -1))
 
-        ;; inner transaction - nothing to do
-        :else
-        (do
-          ;; inner transaction
-          ;; nothing to do really
-          ))
+          ;; inner transaction - nothing to do
+          (and (< 0 depth)
+               (< 0 (count savepoints)))
+          (assoc @ctx
+            :depth (dec depth)
+            :savepoints (rest savepoints))
+
+          :else
+          (throw (IllegalStateException. "Unexpected transaction state!"))))
       this))
   (rollback!
     [this conn]
     (let [{:keys [savepoints depth]} @ctx]
-      (cond
-        (and (< 0 depth)
-             (< 0 (count transient)))
-        (let [[sp & rest] savepoints]
-          (.rollback conn (last savepoints))
-          (vswap! ctx (fn [ctx sp]))
-          this)))))
+      (vswap!
+        ctx
+        (fn [old new] new)
+        (cond
+          ;; Usually ex at transaction initialization
+          (= -1 depth)
+          @ctx
+
+          (= 0 depth)
+          (do
+            (.rollback conn)
+            (assoc
+              @ctx
+              :depth -1))
+
+          (and (< 0 depth)
+               (seq savepoints))
+          (let [[sp & rest] savepoints]
+            (.rollback conn sp)
+            (assoc @ctx
+              :depth (dec depth)
+              rest))
+
+          :else
+          (throw (IllegalStateException. "Unexpected transaction state!"))))
+      this)))
 
 (defn make-default-transaction-strategy
   []
@@ -544,12 +571,11 @@
                          [(first body-and-or-options) (rest body-and-or-options)]
                          [{} body-and-or-options])]
     `(let [~conn-var (-> ~(second binding)
-                         (get-connection ~options)
                          (bind-transaction ~options))]
-       (with-open [conn# (lift-connection ~conn-var)]
-         (do-transactionally
-           ~conn-var ~options
-           (fn [] ~@body))))))
+       #_(with-open [conn# (lift-connection ~conn-var)])
+       (do-transactionally
+         ~conn-var ~options
+         (fn [] ~@body)))))
 
 (defn prepare-query
   "Query the database given `query-spec`. Return the open `ResultSet`.
