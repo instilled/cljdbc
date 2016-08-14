@@ -426,30 +426,28 @@
     stmt))
 
 (defn result-set-seq
-  ([rs]
-   (result-set-seq
-     rs
-     {;; TODO: use execution aspects for parsing
-      ;; based on dialect, e.g. no need for lower-case
-      ;; on mysql as by default is lower-case
-      :col-transform-fn (comp keyword str/lower-case)}))
-  ([^ResultSet rs {:keys [col-transform-fn]}]
-   (let [rsmeta    (.getMetaData rs)
-         col-range (range 1 (inc (.getColumnCount rsmeta)))
-         ks        (for [i col-range]
-                     (-> (.getColumnLabel rsmeta i)
-                         ;; make-cols-unique
-                         (col-transform-fn)))
-         vs        (fn []
-                     (map (fn [^Integer i]
-                            (result-set-read-column
-                              (.getObject rs i)
-                              rsmeta
-                              i))
-                       col-range))]
-     ((fn thisfn []
-        (when (.next rs)
-          (cons (zipmap ks (vs)) (lazy-seq (thisfn)))))))))
+  [^ResultSet rs {:keys [col-transform-fn]}]
+  (let [;; TODO: use execution aspects for parsing
+        ;; based on dialect, e.g. no need for lower-case
+        ;; on mysql as by default is lower-case
+        col-transform-fn (or col-transform-fn
+                             (comp keyword str/lower-case))
+        rsmeta    (.getMetaData rs)
+        col-range (range 1 (inc (.getColumnCount rsmeta)))
+        ks        (for [i col-range]
+                    (-> (.getColumnLabel rsmeta i)
+                        ;; make-cols-unique
+                        (col-transform-fn)))
+        vs        (fn []
+                    (map (fn [^Integer i]
+                           (result-set-read-column
+                             (.getObject rs i)
+                             rsmeta
+                             i))
+                      col-range))]
+    ((fn thisfn []
+       (when (.next rs)
+         (cons (zipmap ks (vs)) (lazy-seq (thisfn))))))))
 
 ;; https://leanpub.com/high-performance-java-persistence/read#leanpub-auto-retrieving-auto-generated-keys
 ;; http://stackoverflow.com/questions/19022175/executebatch-method-return-array-of-value-2-in-java
@@ -494,7 +492,7 @@
   [conn query-spec & [params options]]
   (with-open [stmt (prepare-query (get-connection conn options) query-spec params options)
               rs   (.executeQuery stmt)]
-    (doall (result-set-seq rs))))
+    (doall (result-set-seq rs {}))))
 
 (defn execute!
   "Run an DML query (insert, update, delete) against the dabase.
