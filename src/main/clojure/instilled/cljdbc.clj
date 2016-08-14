@@ -23,6 +23,9 @@
   (rollback! [this ^Connection conn]))
 
 (defprotocol IExecutionAspect
+  (pre-prepare [conn query-spec params])
+  (post-prepare [conn query-spec params])
+
   (pre-insert [conn query-spec params])
   (post-insert [conn query-spec rs])
 
@@ -121,17 +124,24 @@
     [this]))
 
 (defrecord CljdbcProxyStringDataSource
-  [conn transaction]
+  [^String jdbc-url active-connection transaction]
   ICljdbcConnection
   (close
     [this]
-    (.close conn))
+    (when active-connection
+      (.close active-connection)))
   (get-connection
     [this options]
-    conn)
+    (if active-connection
+      active-connection
+      (assoc this
+        :active-connection (DriverManager/getConnection jdbc-url))))
   (lift-connection
     [this]
-    conn)
+    (when-not active-connection
+      (throw (IllegalStateException.
+               "Boom! No active connection. Body shuold usually be wrapped in `with-connection`.")))
+    active-connection)
   (get-transaction
     [this]
     transaction))
@@ -213,7 +223,8 @@
             (assoc @ctx
               :depth -1))
 
-          ;; inner transaction - nothing to do
+          ;; TODO: fb: depth check should not be
+          ;; necessary
           (and (< 0 depth)
                (< 0 (count savepoints)))
           (assoc @ctx
@@ -241,6 +252,8 @@
               @ctx
               :depth -1))
 
+          ;; TODO: fb: depth check should not be
+          ;; necessary
           (and (< 0 depth)
                (seq savepoints))
           (let [[sp & rest] savepoints]
@@ -250,7 +263,9 @@
               rest))
 
           :else
-          (throw (IllegalStateException. "Unexpected transaction state!"))))
+          (throw
+            (IllegalStateException.
+              "Unexpected transaction state. This may be a bug. Please open Github issue with stacktrace!"))))
       this)))
 
 (defn make-default-transaction-strategy
@@ -307,7 +322,8 @@
 
     (string? spec)
     (CljdbcProxyStringDataSource.
-      (DriverManager/getConnection spec)
+      spec
+      nil
       nil)
 
     :else
@@ -412,7 +428,7 @@
 (defn ^{:from "clojure.java.jdbc"} create-prepared-statement
   "Create prepared statement from a connection. Takes a `query-spec`
    with options:
-     :return-keys true | nil
+     :returning true | nil
      :result-type :forward-only | :scroll-insensitive | :scroll-sensitive
      :concurrency :read-only | :updatable
      :cursors     :hold | :close
@@ -420,7 +436,7 @@
      :max-rows    n
      :timeout     n"
   [^Connection conn
-   {{return-keys :return-keys
+   {{returning   :returning
      result-type :result-type
      concurrency :concurrency
      cursors     :cursors
@@ -432,11 +448,11 @@
         (cond
           (dml? query-spec)
           (cond
-            (-> return-keys first string?)
-            (.prepareStatement conn (:sql query-spec) (into-array String return-keys))
-            (-> return-keys first number?)
-            (.prepareStatement conn (:sql query-spec) (into-array Integer return-keys))
-            return-keys
+            (-> returning first string?)
+            (.prepareStatement conn (:sql query-spec) (into-array String returning))
+            (-> returning first number?)
+            (.prepareStatement conn (:sql query-spec) (into-array Integer returning))
+            returning
             (.prepareStatement conn (:sql query-spec) java.sql.Statement/RETURN_GENERATED_KEYS)
             :else
             (.prepareStatement conn (:sql query-spec)))
@@ -449,7 +465,7 @@
                              (get result-set-holdability cursors))
                 (throw
                   (IllegalArgumentException.
-                    (str "Unsupported result-set-type, result-set-concurrency, or result-set-holdability, is: "
+                    (str "Unsupported result-set-type, result-set-concurrency, or result-set-holdability: "
                       (select-keys query-spec [:result-type :concurrency :cursors])))))
               (.prepareStatement conn (:sql query-spec)
                 (get result-set-type result-type)
@@ -461,7 +477,7 @@
                              (get result-set-holdability cursors))
                 (throw
                   (IllegalArgumentException.
-                    (str "Unsupported result-set-type, or result-set-concurrency, is: "
+                    (str "Unsupported result-set-type, or result-set-concurrency: "
                       (select-keys query-spec [:result-type :concurrency])))))
               (.prepareStatement conn (:sql query-spec)
                 (get result-set-type result-type result-type)
@@ -473,19 +489,19 @@
       (when (< fetch-size 0)
         (throw
           (IllegalArgumentException.
-            (str "Unsupported fetch-size. Expecting >= 0, is: " fetch-size))))
+            (str "Unsupported fetch-size. Expecting >= 0. Value: " fetch-size))))
       (.setFetchSize stmt fetch-size))
     (when max-rows
       (when (< max-rows 0)
         (throw
           (IllegalArgumentException.
-            (str "Unsupported max-rows. Expecting >= 0, is: " max-rows))))
+            (str "Unsupported max-rows. Expecting >= 0. Value: " max-rows))))
       (.setMaxRows stmt max-rows))
     (when timeout
       (when (< timeout 0)
         (throw
           (IllegalArgumentException.
-            (str "Unsupported timeout, Expecting >= 0, is: " timeout))))
+            (str "Unsupported timeout, Expecting >= 0. Value: " timeout))))
       (.setQueryTimeout stmt timeout))
     stmt))
 
@@ -516,11 +532,11 @@
 ;; https://leanpub.com/high-performance-java-persistence/read#leanpub-auto-retrieving-auto-generated-keys
 ;; http://stackoverflow.com/questions/19022175/executebatch-method-return-array-of-value-2-in-java
 (defn collect-result
-  "Collect results after an execute query (update, insert, delete). May return
-   auto-increment values for insert operations (if `return-keys == true` and
+  "Collect results after a dml statement. May return
+   auto-increment values for insert operations (if `returning == [pk]` and
    supported by driver) or err to `cnt`."
   [^PreparedStatement stmt
-   {{return-keys :return-keys
+   {{returning :returning
      return-keys-naming-strategy :return-keys-naming-strategy} :options
     :as query-spec}
    cnt]
@@ -537,7 +553,7 @@
                      (throw ex)
                      alt-ret)))
         ret-cnt (^{:once true} fn* [stmt alt-ret] alt-ret)]
-    ((if return-keys ret-ks ret-cnt) stmt cnt)))
+    ((if returning ret-ks ret-cnt) stmt cnt)))
 
 
 ;; #######################################
@@ -545,6 +561,10 @@
 
 (defmacro with-connection
   "Evaluates body in the context of an active connection to the database.
+   A new transaction is automatically spawned.
+
+   An open connection should be used by only one thread concurrently.
+
    (with-connection [conn conn]
      ... con-db ...)"
   [binding & body-and-or-options]
@@ -553,33 +573,34 @@
                          [(first body-and-or-options) (rest body-and-or-options)]
                          [{} body-and-or-options])]
     `(let [spec# ~(second binding)
-           ~conn-var (get-connection spec# ~options)]
+           ~conn-var (-> spec#
+                         (get-connection ~options)
+                         (bind-transaction ~options))]
        (with-open [conn# (lift-connection ~conn-var)]
-         ~@body))))
+         (do-transactionally
+           ~conn-var ~options
+           (fn [] ~@body))))))
 
-(defmacro transactionally
+(defmacro with-transaction
   "Transactionally executes body.
 
-   Reuse existing connection or create a new one if none exists, similar
-   to `with-connection`.
+   `with-transaction` does not create a new connection & transaction scope
+   unless `{:requires-new true}` is provided in `options`.
 
    See also `with-connection`."
   [binding & body-and-or-options]
   (let [conn-var (first binding)
-        ;;[options body] (if-not body [nil options])
         [options body] (if (map? (first body-and-or-options))
                          [(first body-and-or-options) (rest body-and-or-options)]
                          [{} body-and-or-options])]
-    `(let [~conn-var (-> ~(second binding)
-                         (bind-transaction ~options))]
-       #_(with-open [conn# (lift-connection ~conn-var)])
+    `(let [~conn-var ~(second binding)]
        (do-transactionally
          ~conn-var ~options
          (fn [] ~@body)))))
 
 (defn prepare-query
   "Query the database given `query-spec`. Return the open `ResultSet`.
-   Usually you would use `query` or `with-query-rs` functions."
+   Usually you would use `query` fn."
   [^Connection conn query-spec & [params options]]
   (let [query-spec (update query-spec :options merge options)
         stmt (create-prepared-statement conn query-spec)]
@@ -595,7 +616,7 @@
 (defn execute!
   "Run an DML query (insert, update, delete) against the dabase.
    May return auto-increment keys."
-  [conn query-spec & [params {:keys [return-keys] :as options}]]
+  [conn query-spec & [params {:keys [returning] :as options}]]
   (let [query-spec (update query-spec :options merge options)]
     (with-open
       [^PreparedStatement stmt (create-prepared-statement (lift-connection conn) query-spec)]
@@ -615,10 +636,10 @@
             (collect-result stmt query-spec cnt)))))))
 
 (defn insert!
-  "Insert record(s) into the database. If `(= true (:return-keys options))`
+  "Insert record(s) into the database. If `(= true (:returning options))`
    the inserted autogenerated key(s) will be returned (if supported by the
    underlying driver)."
-  [conn query-spec & [params {:keys [return-keys] :as options}]]
+  [conn query-spec & [params {:keys [returning] :as options}]]
   (execute! conn query-spec params options))
 
 (defn update!

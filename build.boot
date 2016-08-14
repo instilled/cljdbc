@@ -6,7 +6,7 @@
    "0.0.1-SNAPSHOT"
 
    :description
-   "An yesql and funcool/java.jdbc inspired sql query facility targeting clojure.java.jdbc - uuhm sorry what?."
+   "A yesql, funcool/java.jdbc and clojure.java.jdbc inspired sql query facility."
 
    :url
    "https://github.org/instilled/cljdbc"

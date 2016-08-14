@@ -15,8 +15,7 @@
         (or return-keys-naming-strategy
             (fn [_] :id))]
     [["insert into planet (system, name, mass) values (:system,:name,:mass)"
-      {:return-keys ["id"]
-       :return-keys-naming-strategy return-keys-naming-strategy}]
+      {:returning ["id"]}]
      ["select * from planet where system = :system"]
      ["update planet set name = :to-name where system = :system and name = :name"]
      ["delete from planet where name = :name"]]))
@@ -137,57 +136,98 @@
                 (deref)
                 :savepoints
                 (count)))]
-    (testing "transaction"
+    (testing "transaction without options"
       (jdbc/with-connection [conn ds]
-        (testing "without options"
-          (jdbc/transactionally [conn conn]
-            (= {:read-only? false
-                :auto-commit true
-                :savepoints (list)
-                :depth 0}
-               (-> (transaction-state conn)
-                   (select-keys [:read-only? :auto-commit
-                                 :savepoints :depth])))))
-        (testing "with options"
-          (jdbc/transactionally [conn conn] {:read-only? true}
-            (= {:auto-commit true
-                :savepoints (list)
-                :depth 0}
-               (-> (transaction-state conn)
-                   (select-keys [:auto-commit :savepoints :depth])))
-            (is (= true
-                   (-> (jdbc/lift-connection conn)
-                       (.isReadOnly))))))
-        (testing "illegal option values throw"
-          (is (thrown?
-                IllegalArgumentException
-                (jdbc/transactionally [conn conn] {:isolation :wrong}))))))
+        (= {:read-only? false
+            :auto-commit true
+            :savepoints (list)
+            :depth 0}
+           (-> (transaction-state conn)
+               (select-keys [:read-only? :auto-commit
+                             :savepoints :depth])))))
+
+    (testing "transaction with options"
+      (jdbc/with-connection [conn ds] {:read-only? true}
+        (= {:auto-commit true
+            :savepoints (list)
+            :depth 0}
+           (-> (transaction-state conn)
+               (select-keys [:auto-commit :savepoints :depth])))
+        (is (= true
+               (-> (jdbc/lift-connection conn)
+                   (.isReadOnly))))))
+
+    (testing "transaction with illegal option values throw"
+      (is (thrown?
+            IllegalArgumentException
+            (jdbc/with-connection [conn ds] {:isolation :wrong}))))
 
     (testing "nested transaction"
       (jdbc/with-connection [conn ds]
-        (jdbc/transactionally [conn conn]
+        (is (= {:auto-commit true
+                :savepoints (list)
+                :depth 0}
+               (-> (transaction-state conn)
+                   (select-keys [:auto-commit :savepoints :depth]))))
+        (jdbc/with-transaction [conn conn]
           (is (= {:auto-commit true
-                  :savepoints (list)
-                  :depth 0}
+                  :depth 1}
                  (-> (transaction-state conn)
-                     (select-keys [:auto-commit :savepoints :depth]))))
-          (jdbc/transactionally [conn conn]
-            (is (= {:auto-commit true
-                    :depth 1}
+                     (select-keys [:auto-commit :depth]))))
+          (is (= 1
+                 (savepoint-count conn)))
+          (jdbc/with-transaction [conn conn]
+            (is (= {:depth 2}
                    (-> (transaction-state conn)
-                       (select-keys [:auto-commit :depth]))))
-            (is (= 1
-                   (savepoint-count conn)))
-            (jdbc/transactionally [conn conn]
-              (is (= {:depth 2}
-                     (-> (transaction-state conn)
-                         (select-keys [:depth]))))
-              (is (= 2
-                     (savepoint-count conn))))
-            (is (= 1
+                       (select-keys [:depth]))))
+            (is (= 2
                    (savepoint-count conn))))
-          (is (= {:auto-commit true
-                  :savepoints (list)
-                  :depth 0}
-                 (-> (transaction-state conn)
-                     (select-keys [:auto-commit :savepoints :depth])))))))))
+          (is (= 1
+                 (savepoint-count conn))))
+        (is (= {:auto-commit true
+                :savepoints (list)
+                :depth 0}
+               (-> (transaction-state conn)
+                   (select-keys [:auto-commit :savepoints :depth]))))))
+
+    (testing "queries"
+      (jdbc/with-connection [conn ds]
+        (jdbc/delete! conn
+          (jdbc/parse-statement "delete from planet"))
+        (jdbc/insert! conn
+          (jdbc/parse-statement
+            "insert into planet (system, name, mass) values (:system,:name,:mass)")
+          (mapv (fn [i]
+                  {:system (str "System " i)
+                   :name   "Planet"
+                   :mass   1})
+            (range 0 100)))
+        (is (= 100
+               (->> (jdbc/parse-statement "select * from planet")
+                    (jdbc/query conn)
+                    (count)))))
+
+      (jdbc/with-connection [conn ds]
+        (try
+          (jdbc/delete! conn
+            (jdbc/parse-statement "delete from planet"))
+          (jdbc/insert! conn
+            (jdbc/parse-statement
+              "insert into planet (system, name, mass) values (:system,:name,:mass)")
+            [{:system "Virgo" :name "Draugr" :mass -1}])
+          (jdbc/with-transaction [conn conn]
+            (jdbc/insert! conn
+              (jdbc/parse-statement
+                "insert into planet (system, name, mass) values (:system,:name,:mass)")
+              (mapv (fn [i]
+                      {:system (str "System " i)
+                       :name   "Planet"
+                       :mass   1})
+                (range 0 100)))
+            ;; This should rollback only the inner transaction (insert)
+            (throw (IllegalStateException. "expected")))
+          (catch Throwable t
+            (is (= 1
+                   (->> (jdbc/parse-statement "select * from planet")
+                        (jdbc/query conn)
+                        (count))))))))))
