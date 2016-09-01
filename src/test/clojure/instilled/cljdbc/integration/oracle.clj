@@ -43,7 +43,7 @@
                  INTO   :new.id
                  FROM   dual;
              END;"]))
-      (apply basic-crud-tests ds (crud-queries))
+      (basic-crud-tests ds)
       (statement-option-test ds)
       (transaction-tests ds)
       (finally

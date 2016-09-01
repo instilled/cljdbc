@@ -366,6 +366,15 @@
     :execute true
     false))
 
+(defn batched?
+  "True if batching should be user in DML statements."
+  [query-spec]
+  (get-in query-spec [:options :batched?]))
+
+(defn named-or-positional?
+  [query-spec]
+  (get query-spec :params-idx))
+
 (defn parse-statement
   "Parse a possibly parametrized sql-string into `QuerySpec`.
    Both, named and sequential params, are supported. Params
@@ -421,8 +430,13 @@
 (defn set-prepared-statement-params!
   "Set the `stmt`'s `params` based on `query-spec`."
   [^PreparedStatement stmt query-spec params]
-  (doseq [[k ixs] (:params-idx query-spec) ix ixs]
-    (set-parameter (get params k) stmt ix))
+  (if (named-or-positional? query-spec)
+    ;; TODO: validate params is also named or positional?
+    (doseq [[k ixs] (:params-idx query-spec) ix ixs]
+      (set-parameter (get params k) stmt ix))
+    (dorun
+      ;; TODO: is map-indexed in dorun the right choice?
+      (map-indexed (fn [ix v] (set-parameter v stmt (inc ix))) params)))
   stmt)
 
 (defn ^{:from "clojure.java.jdbc"} create-prepared-statement
@@ -473,8 +487,7 @@
                 (get result-set-holdability cursors)))
             (do
               (when-not (and (get result-set-type result-type)
-                             (get result-set-concurrency concurrency)
-                             (get result-set-holdability cursors))
+                             (get result-set-concurrency concurrency))
                 (throw
                   (IllegalArgumentException.
                     (str "Unsupported result-set-type, or result-set-concurrency: "
@@ -619,17 +632,23 @@
   [conn query-spec & [params {:keys [returning] :as options}]]
   (let [query-spec (update query-spec :options merge options)]
     (with-open
-      [^PreparedStatement stmt (create-prepared-statement (lift-connection conn) query-spec)]
-      ;; TODO: better cond
-      (if (and (vector? params)
-               (or (map? (first params))
-                   (vector? (first params))))
+      [^PreparedStatement stmt (create-prepared-statement
+                                 (lift-connection conn) query-spec)]
+      (if (and (sequential? params)
+               (coll? (first params)))
+        ;; multiple "rows" - either insert batched or iterate over each
+        ;; row
+        ;; TODO: may strategy depend on driver?
         (do
-          (doseq [params params]
-            (set-prepared-statement-params! stmt query-spec params)
-            (.addBatch stmt))
-          (let [cnt (into [] (.executeBatch stmt))]
-            (collect-result stmt query-spec cnt)))
+          (if (batched? query-spec)
+            (do
+              (doseq [params params]
+                (set-prepared-statement-params! stmt query-spec params)
+                (.addBatch stmt))
+              (let [cnt (into [] (.executeBatch stmt))]
+                (collect-result stmt query-spec cnt)))
+            (throw (UnsupportedOperationException. "Currently not implemented!"))))
+        ;; either no data or a single "row"
         (do
           (set-prepared-statement-params! stmt query-spec params)
           (let [cnt (.executeUpdate stmt)]

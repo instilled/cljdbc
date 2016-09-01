@@ -26,7 +26,7 @@
            name   VARCHAR(30) NOT NULL,
            mass   DECIMAL(65,30) NOT NULL,
            PRIMARY KEY (id))"]))
-      (apply basic-crud-tests ds (crud-queries))
+      (basic-crud-tests ds)
       (statement-option-test ds)
       (transaction-tests ds)
       (finally

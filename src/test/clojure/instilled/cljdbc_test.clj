@@ -6,7 +6,7 @@
 (deftest test-parse-statement
   (testing "nothing to replace"
     (let [qs (parse-statement "select * from table1")]
-      (is (nil? (:params-idx qs)))
+      (is (nil? (named-or-positional? qs)))
       (is (= "select * from table1" (:sql qs)))
       (is (= {:op :select :table "table1"} (:meta qs)))))
 
@@ -39,6 +39,12 @@
 
   (testing "delete"
     (let [qs (parse-statement "delete from table1")]
-      (is (nil? (:params-idx qs)))
+      (is (nil? (named-or-positional? qs)))
       (is (= "delete from table1" (:sql qs)))
-      (is (= {:op :delete :table "table1"} (:meta qs))))) )
+      (is (= {:op :delete :table "table1"} (:meta qs)))))
+
+  (testing "classic params (positional but with ? only)"
+    (let [qs (parse-statement "delete from table1")]
+      (is (nil? (named-or-positional? qs)))
+      (is (= "delete from table1" (:sql qs)))
+      (is (= {:op :delete :table "table1"} (:meta qs))))))
