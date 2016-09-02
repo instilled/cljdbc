@@ -27,6 +27,7 @@ Contributions & bugfixes are much appreciated!
 * [tbd] DDL statements
 * [tbd] Auto-select queries based on dialect (to support multi-dialect code)
 * [tbd] Support Spring's transaction manager & JDBC Template bindings
+* [tbd] Investigate `clojure.spec` support?
 
 ### Dialect support roadmap
 
@@ -94,7 +95,7 @@ To get started create a datasource.
     ))
 
 ;; or classic positional
-(def my-query (jdbc/paIse-statement "select mass from planet where mass > ? and system = ?"))
+(def my-query (jdbc/parse-statement "select mass from planet where mass > ? and system = ?"))
 (jdbc/with-connection [conn ds]
   (let [result (jdbc/query conn my-query [100 "Solar System"])]
     ;; do something with `result`
@@ -168,7 +169,7 @@ docker boxes) then type
 It is assumed that docker agent runs natively on the machine, i.e.
 not through anything like `boot2docker`.
 
-For oracle type:   then type
+## Oracle
 
 ```sh
 (cd src/docker/docker-oracle && docker build -t cljdbc-oracle .)
@@ -183,7 +184,7 @@ password: cljdbc
 host: localhost:49161
 ```
 
-Things are similar for mysql. Type:
+## MySQL
 
 ```sh
 (cd src/docker/docker-mysql && docker build -t cljdbc-mysql .)
@@ -197,6 +198,23 @@ user: cljdbc
 password: cljdbc
 host: localhost:49161
 ```
+
+## Postgres
+
+```sh
+(cd src/docker/docker-postgres && docker build -t cljdbc-postgres .)
+docker run -e POSTGRES_PASSWORD=cljdbc-root -d -p 5432:5432 cljdbc-postgres
+```
+
+You can connect to it with
+
+```sh
+user: cljdbc
+password: cljdbc
+host: localhost:5432
+```
+
+
 
 # License
 

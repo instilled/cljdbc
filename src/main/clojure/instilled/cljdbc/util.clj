@@ -1,4 +1,10 @@
-(ns instilled.cljdbc.internal.util)
+(ns instilled.cljdbc.util
+  (:require
+    [instilled.cljdbc :as j])
+  (:import
+    [java.sql
+     ResultSet
+     PreparedStatement]))
 
 (def jdbc-string->driver-map
   "Map used to map jdbc url to driver map."

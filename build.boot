@@ -74,7 +74,7 @@
   []
   (set-env!
     :dependencies
-    #(conj % '[mysql/mysql-connector-java "5.1.31" :scope "test"]))
+    #(conj % '[mysql/mysql-connector-java "5.1.39" :scope "test"]))
   (task-options!
     test {:filters #{'(-> % meta :mysql)}}))
 

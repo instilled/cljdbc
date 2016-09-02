@@ -8,7 +8,7 @@
 (deftest ^:integration ^:mysql test-mysql-crud
   (let [;; running in docker
         ds (jdbc/make-datasource
-             (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s"
+             (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s&useSSL=false"
                (or (env :db.mysql.host) "localhost")
                (or (env :db.mysql.port) "3306")
                (or (env :db.mysql.name) "cljdbc")

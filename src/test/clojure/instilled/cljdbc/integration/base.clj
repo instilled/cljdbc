@@ -16,8 +16,8 @@
       (let [rs (jdbc/insert!
                  conn
                  (jdbc/parse-statement
-                   "insert into planet (system, name, mass) values (:system,:name,:mass)"
-                   {:returning ["id"]
+                   "insert into planet (system,name,mass) values (:system,:name,:mass)"
+                   {:returning [:id :system]
                     :batched? true})
                  (mapv (fn [i]
                          {:system (str "System " i)
@@ -26,10 +26,8 @@
                    (range 0 100)))]
         (dotimes [n 100]
           (is (= (+ 1 n)
-                 ;; TODO: naming of pk should be same for all
-                 ;; dialects
                  (let [r (nth rs n)]
-                   (long (or (:id r) (:generated_key r)))))))))
+                   (long (:id r))))))))
 
     (testing "query"
       (let [qs (jdbc/parse-statement "select * from planet")
@@ -68,7 +66,7 @@
       (let [rs (jdbc/insert!
                  conn
                  (jdbc/parse-statement
-                   "insert into planet (system, name, mass) values (?,?,?)"
+                   "insert into planet (system,name,mass) values (?,?,?)"
                    {:batched? true})
                  (mapv (fn [i]
                          [(str "System " i)
@@ -201,7 +199,7 @@
           (jdbc/parse-statement "delete from planet"))
         (jdbc/insert! conn
           (jdbc/parse-statement
-            "insert into planet (system, name, mass) values (:system,:name,:mass)"
+            "insert into planet (system,name,mass) values (:system,:name,:mass)"
             {:batched? true})
           (mapv (fn [i]
                   {:system (str "System " i)
@@ -219,12 +217,12 @@
             (jdbc/parse-statement "delete from planet"))
           (jdbc/insert! conn
             (jdbc/parse-statement
-              "insert into planet (system, name, mass) values (:system,:name,:mass)")
+              "insert into planet (system,name,mass) values (:system,:name,:mass)")
             {:system "Virgo" :name "Draugr" :mass -1})
           (jdbc/with-transaction [conn conn]
             (jdbc/insert! conn
               (jdbc/parse-statement
-                "insert into planet (system, name, mass) values (:system,:name,:mass)"
+                "insert into planet (system,name,mass) values (:system,:name,:mass)"
                 {:batched? true})
               (mapv (fn [i]
                       {:system (str "System " i)
