@@ -1,4 +1,4 @@
-(ns instilled.cljdbc.dialect.oracle
+(ns instilled.cljdbc.vendor.oracle
   (:require
     [instilled.cljdbc :as jdbc])
   (:import
@@ -6,8 +6,8 @@
      ResultSet
      PreparedStatement]))
 
-(defrecord OracleDialect []
-  jdbc/ISQLDialect
+(defrecord OracleVendor []
+  jdbc/ISQLVendor
   (rs-col-name
     [this rs rsmeta i query-spec]
     (-> (.getColumnLabel rsmeta i) (.toLowerCase) (keyword)))
@@ -21,9 +21,9 @@
     [this cnt]
     cnt))
 
-(defn dialect
+(defn extension
   []
-  (OracleDialect.))
+  (OracleVendor.))
 
 
 ;;(defn default-sequence-name-generator-fn

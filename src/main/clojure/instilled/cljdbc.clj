@@ -26,7 +26,7 @@
   (commit! [this ^Connection conn])
   (rollback! [this ^Connection conn]))
 
-(defprotocol ISQLDialect
+(defprotocol ISQLVendor
   (rs-col-name [this ^ResultSet rs ^ResultSetMetaData rsmeta i query-spec])
   (rs-col-value [this ^ResultSet rs ^ResultSetMetaData rsmeta i query-spec])
   (returning [this ^ResultSet rs query-spec returning-cols])
@@ -106,7 +106,7 @@
     [this])
   (get-transaction
     [this])
-  (sql-dialect
+  (sql-vendor
     [this]))
 
 (def ^{:private true :doc "Transaction isolation levels."}
@@ -134,7 +134,7 @@
    :scroll-sensitive ResultSet/TYPE_SCROLL_SENSITIVE})
 
 (defrecord CljdbcProxyDataSource
-  [^instilled.cljdbc.ICljdbcConnectionAware ds sql-dialect active-connection transaction]
+  [^instilled.cljdbc.ICljdbcConnectionAware ds sql-vendor active-connection transaction]
   ICljdbcConnection
   (get-connection
     [this options]
@@ -152,9 +152,9 @@
   (get-transaction
     [this]
     transaction)
-  (sql-dialect
+  (sql-vendor
     [this]
-    sql-dialect)
+    sql-vendor)
   (close
     [this]
     (.close ds)))
@@ -371,7 +371,7 @@
 
 (defn process-result-set
   "Process result set."
-  [^ResultSet rs query-spec sql-dialect]
+  [^ResultSet rs query-spec sql-vendor]
   (let [rs-meta (.getMetaData rs)
         col-cnt (inc (.getColumnCount rs-meta))
         ks (loop [i 1
@@ -381,7 +381,7 @@
                  (inc i)
                  (conj!
                    res
-                   (rs-col-name sql-dialect rs rs-meta i query-spec)))
+                   (rs-col-name sql-vendor rs rs-meta i query-spec)))
                (persistent! res)))
         vs (fn []
              (loop [i 1
@@ -391,7 +391,7 @@
                    (inc i)
                    (conj!
                      res
-                     (rs-col-value sql-dialect rs rs-meta i query-spec)))
+                     (rs-col-value sql-vendor rs rs-meta i query-spec)))
                  (persistent! res))))]
     ((fn thisfn []
        (when (.next rs)
@@ -490,7 +490,7 @@
 (defn result-set-seq
   [^ResultSet rs {:keys [col-transform-fn]}]
   (let [;; TODO: use execution aspects for parsing
-        ;; based on dialect, e.g. no need for lower-case
+        ;; based on vendor, e.g. no need for lower-case
         ;; on mysql as by default is lower-case
         col-transform-fn (or col-transform-fn
                              (comp keyword str/lower-case))
@@ -523,7 +523,7 @@
       (throw (IllegalStateException. "Savepoint support required!")))
     conn))
 
-(defn load-dialect-ext
+(defn load-vendor-extension
   [connection-aware]
   (try
     (let [conn (new-connection connection-aware)
@@ -536,10 +536,10 @@
                              (<= min-version mv))))
                     (first))]
       (load-and-invoke
-        (format "instilled.cljdbc.dialect.%s/dialect"
+        (format "instilled.cljdbc.vendor.%s/extension"
           (if ext (first ext) "generic"))))
     (catch Exception e
-      (throw (IllegalStateException. "Failed to load dialect extension" e)))))
+      (throw (IllegalStateException. "Failed to load vendor extension" e)))))
 
 (defmacro with-open-statement
   "Shortcut to `(with-open [(first binding) (second binding)] ... body ...)`"
@@ -630,7 +630,7 @@
     (validate-driver connection-aware)
     (CljdbcProxyDataSource.
       connection-aware
-      (load-dialect-ext connection-aware)
+      (load-vendor-extension connection-aware)
       nil
       nil)))
 
@@ -675,25 +675,25 @@
 (defn query
   "Query the database given `query-spec`."
   [conn query-spec & [params options]]
-  (let [sql-dialect (sql-dialect conn)
+  (let [sql-vendor (sql-vendor conn)
         query-spec (update query-spec :options merge options)]
     (with-open-statement [stmt conn] query-spec
       (set-prepared-statement-params! stmt query-spec params)
       (with-open [rs (.executeQuery stmt)]
-        (doall (process-result-set rs query-spec sql-dialect))))))
+        (doall (process-result-set rs query-spec sql-vendor))))))
 
 (defn execute!
   "Run a DML query (insert, update, delete) against the dabase.
    May return auto-generated primary keys."
   [conn query-spec & [params options]]
-  (let [dialect        (sql-dialect conn)
+  (let [vendor        (sql-vendor conn)
         query-spec     (update query-spec :options merge options)
         returning-cols (get-in query-spec [:options :returning])
         result        (fn ^:once [stmt cnt]
                         (if returning-cols
                           (with-open [rs (.getGeneratedKeys stmt)]
-                            (doall (returning dialect rs query-spec returning-cols)))
-                          (returning-count dialect cnt)))]
+                            (doall (returning vendor rs query-spec returning-cols)))
+                          (returning-count vendor cnt)))]
     (if (and (sequential? params)
              (coll? (first params)))
       (if (batched? query-spec)

@@ -1,4 +1,4 @@
-(ns instilled.cljdbc.dialect.mysql
+(ns instilled.cljdbc.vendor.mysql
   (:require
     [instilled.cljdbc :as jdbc])
   (:import
@@ -6,8 +6,8 @@
      ResultSet
      PreparedStatement]))
 
-(defrecord MysqlDialect []
-  jdbc/ISQLDialect
+(defrecord MysqlVendor []
+  jdbc/ISQLVendor
   (rs-col-name
     [this rs rsmeta i query-spec]
     (-> (.getColumnLabel rsmeta i) (.toLowerCase) (keyword)))
@@ -23,9 +23,9 @@
     [this cnt]
     cnt))
 
-(defn dialect
+(defn extension
   []
-  (MysqlDialect.))
+  (MysqlVendor.))
 
 
 ;;(defn default-sequence-name-generator-fn

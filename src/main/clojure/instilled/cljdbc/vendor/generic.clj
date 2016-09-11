@@ -1,4 +1,4 @@
-(ns instilled.cljdbc.dialect.generic
+(ns instilled.cljdbc.vendor.generic
   (:require
     [instilled.cljdbc :as jdbc])
   (:import
@@ -6,8 +6,8 @@
      ResultSet
      PreparedStatement]))
 
-(defrecord GenericDialect []
-  jdbc/ISQLDialect
+(defrecord GenericVendor []
+  jdbc/ISQLVendor
   (rs-col-name
     [this rs rsmeta i query-spec]
     (-> (.getColumnLabel rsmeta i) (.toLowerCase) (keyword)))
@@ -21,6 +21,6 @@
     [this cnt]
     cnt))
 
-(defn dialect
+(defn extension
   []
-  (GenericDialect.))
+  (GenericVendor.))
