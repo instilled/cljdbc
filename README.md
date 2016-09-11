@@ -30,7 +30,7 @@ Contributions & bugfixes are much appreciated!
 * [tbd] Support Spring's transaction manager & JDBC Template bindings
 * [tbd] Investigate `clojure.spec` support?
 
-### Vendor support roadmap
+### Vendor support
 
 * MySQL -> ok
 * Oracle -> ok
@@ -60,7 +60,17 @@ Missing features:
 
 # Quick Start
 
-To get started create a datasource.
+To get started create a datasource. `make-datasource` takes
+either a
+
+* jdbc url
+* pre-configured `java.sql.DataSource`
+* string pointing to some jndi datasource (prefix the location with
+  `jndi:`)
+
+Unlike `clojure.java.jdbc` cljdbc does not support other forms of
+creating a connection/datasource, e.g. through a map. All
+connection details must thus be provided in the jdbc-url.
 
 ```clojure
 (require [instilled.cljdbc :as jdbc])
@@ -69,8 +79,8 @@ To get started create a datasource.
 ;; Currently only hikari is supported. Others (C3P0, Tomcat CP) are WIP.
 ;; Requires hikari dependency be on the classpath, throws otherwise.
 (def ds
-  (jdbc/make-datasource "jdbc:mysql://localhost:3306/cljdbc?username=cljdbc?password=cljdbc")
-  {:hikari {}})
+  (jdbc/make-datasource "jdbc:mysql://localhost:3306/cljdbc?username=cljdbc?password=cljdbc"
+   {:hikari {}})
 
 ;; This one is unpooled and uses java.sql.DriverManager/getConnection each time
 ;; a connection is requested.
@@ -78,6 +88,8 @@ To get started create a datasource.
   (jdbc/make-datasource "jdbc:mysql://localhost:3306/cljdbc?username=cljdbc?password=cljdbc"))
 ```
 
+See `instilled.cljdbc.cp.{hikari,...}` for possible options supported
+by the connection pool.
 
 ## Query
 
@@ -130,12 +142,6 @@ TBD
 ```clojure
 (with-transaction [conn conn] <options>
    ...)
-```
-
-```clojure
-;; Use (binding [*var* (with-transaction [conn conn]
-(with-transaction-binding [*var* conn] <options>
-  ...)
 ```
 
 ## DDL

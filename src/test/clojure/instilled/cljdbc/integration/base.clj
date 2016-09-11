@@ -3,14 +3,16 @@
     [instilled.cljdbc  :as jdbc]
     [clojure.test      :refer :all]))
 
-(defn env
-  [k]
-  (let [^String kstr (name k)]
-    (or (System/getProperty kstr)
-        (System/getenv (-> kstr (.replaceAll "(\\.|-)" "_") (.toUpperCase))))))
+(def ^:dynamic *global-conn*
+  nil)
 
 (defn basic-crud-tests
   [ds]
+  (testing "binding"
+    (jdbc/with-connection-binding [*global-conn* ds]
+      (let [rs (jdbc/query *global-conn*
+                 (jdbc/parse-statement "select * from planet"))]
+        (is (empty? rs)))))
   (jdbc/with-connection [conn ds]
     (testing "insert"
       (let [rs (jdbc/insert!

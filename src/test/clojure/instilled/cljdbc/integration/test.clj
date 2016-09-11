@@ -5,6 +5,12 @@
     [clojure.java.jdbc                 :as clojure.jdbc]
     [clojure.test                      :refer :all]))
 
+(defn env
+  [k]
+  (let [^String kstr (name k)]
+    (or (System/getProperty kstr)
+        (System/getenv (-> kstr (.replaceAll "(\\.|-)" "_") (.toUpperCase))))))
+
 (defn prepare-and-run
   [jdbc-url ddl]
   (let [ds (jdbc/make-datasource jdbc-url {:hikari {}})]

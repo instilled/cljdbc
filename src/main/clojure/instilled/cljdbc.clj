@@ -326,6 +326,12 @@
         (rollback! transaction conn*)
         (throw t)))))
 
+(defn parse-body-and-or-options
+  [body-and-or-options]
+  (if (map? (first body-and-or-options))
+    [(first body-and-or-options) (rest body-and-or-options)]
+    [{} body-and-or-options]))
+
 (defn ^:private jndi-spec?
   [spec]
   (and (string? spec)
@@ -644,13 +650,23 @@
      ... con-db ...)"
   [binding & body-and-or-options]
   (let [conn-var (first binding)
-        [options body] (if (map? (first body-and-or-options))
-                         [(first body-and-or-options) (rest body-and-or-options)]
-                         [{} body-and-or-options])]
-    `(let [spec# ~(second binding)
-           ~conn-var (-> spec#
+        [options body] (parse-body-and-or-options body-and-or-options)]
+    `(let [~conn-var (-> ~(second binding)
                          (get-connection ~options)
                          (bind-transaction ~options))]
+       (with-open [conn# (lift-connection ~conn-var)]
+         (do-transactionally
+           ~conn-var ~options
+           (fn [] ~@body))))))
+
+(defmacro with-connection-binding
+  "Uses `(binding [...] ...)` to establish the connection."
+  [binding & body-and-or-options]
+  (let [conn-var (first binding)
+        [options body] (parse-body-and-or-options body-and-or-options)]
+    `(binding [~conn-var (-> ~(second binding)
+                             (get-connection ~options)
+                             (bind-transaction ~options))]
        (with-open [conn# (lift-connection ~conn-var)]
          (do-transactionally
            ~conn-var ~options
@@ -664,9 +680,7 @@
   ;; If a new transaction context is required `{:requires-new true}`
   ;; must be set in `options`.
   (let [conn-var (first binding)
-        [options body] (if (map? (first body-and-or-options))
-                         [(first body-and-or-options) (rest body-and-or-options)]
-                         [{} body-and-or-options])]
+        [options body] (parse-body-and-or-options body-and-or-options)]
     `(let [~conn-var ~(second binding)]
        (do-transactionally
          ~conn-var ~options
