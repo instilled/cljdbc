@@ -87,6 +87,15 @@
   (task-options!
     test {:filters #{'(-> % meta :oracle)}}))
 
+(deftask postgres
+  "Add postgres to the classpath."
+  []
+  (set-env!
+    :dependencies
+    #(conj % '[org.postgresql/postgresql "9.4.1210.jre7" :scope "test"]))
+  (task-options!
+    test {:filters #{'(-> % meta :postgres)}}))
+
 (replace-task!
   [t test] (fn [& xs] (comp (test1) (apply t xs)))
   [r repl] (fn [& xs] (comp (test1) (apply r xs))))
