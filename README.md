@@ -1,4 +1,4 @@
-# Cljdbc
+# Cljdbc [![Build Status][badge]][build]
 
 This is alpha software! Basic db ops should work fairly well. Transaction
 support is still under development but may work as well. Expect some breaking
@@ -10,6 +10,7 @@ queries and adds further capabilities for named parameters as does `yesql`.
 Declaring named & positional parameters uses Spring notation (colon).
 
 Contributions & bugfixes are much appreciated!
+
 
 
 ## Features & WIP
@@ -225,9 +226,12 @@ host: localhost:5432
 ```
 
 
-
 # License
 
 Copyright (C) 2016 Fabio Bernasconi
 
 Distributed under the Eclipse Public License, the same as Clojure.
+
+
+[badge]: https://travis-ci.org/instilled/cljdbc.svg?branch=master
+[build]: https://travis-ci.org/instilled/cljdbc
