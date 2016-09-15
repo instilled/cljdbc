@@ -1,0 +1,13 @@
+language: clojure
+#services:
+#  - docker
+jdk:
+  - oraclejdk8
+before_install:
+#  - docker build -t cljdbc-mysql src/docker/docker-mysql
+#  - docker run -e MYSQL_ROOT_PASSWORD=cljdbc -d -p 3306:3306 cljdbc-mysql
+  - wget -O boot https://github.com/boot-clj/boot-bin/releases/download/latest/boot.sh
+install:
+  - chmod 755 boot
+  - ./boot -V
+script: ./boot test

@@ -43,8 +43,8 @@
   :source-paths
   #{"src/main/clojure"}
 
-  :resource-paths
-  #{"src/main/resources"}
+  ;;:resource-paths
+  ;;#{"src/main/resources"}
 
   :target-path
   "target"
