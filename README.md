@@ -11,6 +11,7 @@ Declaring named & positional parameters uses Spring notation (colon).
 
 Contributions & bugfixes are much appreciated!
 
+[![Clojars Project](https://img.shields.io/clojars/v/cljdbc.svg)](https://clojars.org/cljdbc)
 
 
 ## Features & WIP

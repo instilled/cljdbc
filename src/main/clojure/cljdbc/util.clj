@@ -1,6 +1,6 @@
-(ns instilled.cljdbc.util
+(ns cljdbc.util
   (:require
-    [instilled.cljdbc :as j])
+    [cljdbc :as j])
   (:import
     [java.sql
      ResultSet

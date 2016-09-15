@@ -1,6 +1,6 @@
-(ns instilled.cljdbc-test
+(ns cljdbc-test
   (:require
-    [instilled.cljdbc :refer :all]
+    [cljdbc :refer :all]
     [clojure.test     :refer :all]))
 
 (deftest test-parse-statement

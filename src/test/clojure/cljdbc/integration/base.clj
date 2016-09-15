@@ -1,7 +1,7 @@
-(ns instilled.cljdbc.integration.base
+(ns cljdbc.integration.base
   (:require
-    [instilled.cljdbc  :as jdbc]
-    [clojure.test      :refer :all]))
+    [cljdbc       :as jdbc]
+    [clojure.test :refer :all]))
 
 (def ^:dynamic *global-conn*
   nil)

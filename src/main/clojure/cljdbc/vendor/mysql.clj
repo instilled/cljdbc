@@ -1,6 +1,6 @@
-(ns instilled.cljdbc.vendor.mysql
+(ns cljdbc.vendor.mysql
   (:require
-    [instilled.cljdbc :as jdbc])
+    [cljdbc :as jdbc])
   (:import
     [java.sql
      ResultSet

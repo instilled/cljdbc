@@ -1,6 +1,6 @@
 (def artifact
   {:project
-   'instilled/cljdbc
+   'cljdbc/cljdbc
 
    :version
    "0.0.1-SNAPSHOT"
@@ -20,9 +20,7 @@
 
 (set-env!
   :dependencies
-  '[[org.clojure/java.jdbc                           "0.5.8"]
-
-    ;; provided
+  '[;; provided
     [com.zaxxer/HikariCP                             "2.4.5"
      :scope "provided"]
     [org.clojure/clojure                             "1.8.0"
@@ -37,6 +35,8 @@
      :scope "provided"]
 
     ;; test dependencies
+    [org.clojure/java.jdbc                           "0.5.8"
+     :scope "test"]
     [adzerk/boot-test                                "1.1.1"
      :scope "test"]]
 
@@ -55,8 +55,9 @@
 (require '[adzerk.boot-test :refer :all])
 
 (task-options!
-  pom artifact
-  test       {:filters #{'(not (-> % meta :integration))}})
+  pom  artifact
+  test {:filters #{'(not (-> % meta :integration))}}
+  jar  {:file (str "cljdbc-" (:version artifact) ".jar")})
 
 (deftask test1
   "Add test sources and resources to the classpath."
@@ -95,6 +96,31 @@
     #(conj % '[org.postgresql/postgresql "9.4.1210.jre7" :scope "test"]))
   (task-options!
     test {:filters #{'(-> % meta :postgres)}}))
+
+(deftask remove-ignored
+  []
+  (sift
+    :invert true
+    :include #{#".*\.swp" #".gitkeep"}))
+
+(deftask build
+  "Build the shizzle."
+  []
+  (merge-env!
+    :resource-paths
+    #{"src/main/clojure"})
+  (comp
+    (remove-ignored)
+    (pom)
+    (jar)
+    (target)
+    (install)))
+
+(deftask deploy
+  []
+  (push
+    :gpg-sign false
+    :repo "clojars"))
 
 (replace-task!
   [t test] (fn [& xs] (comp (test1) (apply t xs)))

@@ -1,4 +1,4 @@
-(ns instilled.cljdbc.cp.hikari
+(ns cljdbc.cp.hikari
   (:import
     [com.zaxxer.hikari
      HikariConfig

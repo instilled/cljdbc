@@ -1,4 +1,4 @@
-(ns instilled.cljdbc
+(ns cljdbc
   (:require
     [clojure.string :as str])
   (:import
@@ -134,7 +134,7 @@
    :scroll-sensitive ResultSet/TYPE_SCROLL_SENSITIVE})
 
 (defrecord CljdbcProxyDataSource
-  [^instilled.cljdbc.ICljdbcConnectionAware ds sql-vendor active-connection transaction]
+  [^cljdbc.ICljdbcConnectionAware ds sql-vendor active-connection transaction]
   ICljdbcConnection
   (get-connection
     [this options]
@@ -297,7 +297,7 @@
   [jdbc-url options]
   (let [t (connection-pool-type options)]
     (load-and-invoke
-      (format "instilled.cljdbc.cp.%s/make-pool" (name t))
+      (format "cljdbc.cp.%s/make-pool" (name t))
       jdbc-url
       (get options t))))
 
@@ -542,7 +542,7 @@
                              (<= min-version mv))))
                     (first))]
       (load-and-invoke
-        (format "instilled.cljdbc.vendor.%s/extension"
+        (format "cljdbc.vendor.%s/extension"
           (if ext (first ext) "generic"))))
     (catch Exception e
       (throw (IllegalStateException. "Failed to load vendor extension" e)))))

@@ -1,9 +1,9 @@
-(ns instilled.cljdbc.integration.test
+(ns cljdbc.integration.test
   (:require
-    [instilled.cljdbc                  :as jdbc]
-    [instilled.cljdbc.integration.base :refer :all]
-    [clojure.java.jdbc                 :as clojure.jdbc]
-    [clojure.test                      :refer :all]))
+    [cljdbc                  :as jdbc]
+    [cljdbc.integration.base :refer :all]
+    [clojure.java.jdbc       :as clojure.jdbc]
+    [clojure.test            :refer :all]))
 
 (defn env
   [k]
