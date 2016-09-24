@@ -100,6 +100,15 @@
   (task-options!
     test {:filters #{'(-> % meta :postgres)}}))
 
+(deftask sqlite
+  "Add postgres to the classpath."
+  []
+  (set-env!
+    :dependencies
+    #(conj % '[org.xerial/sqlite-jdbc "3.8.11.2" :scope "test"]))
+  (task-options!
+    test {:filters #{'(-> % meta :sqlite)}}))
+
 (deftask remove-ignored
   []
   (sift

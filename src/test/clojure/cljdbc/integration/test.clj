@@ -107,17 +107,49 @@
            FROM   dual;
        END;"]))
 
+
+;; ------------------------------
+;; postgres
+
+(def postgres-jdbc-url
+  (format "jdbc:postgresql://%s:%s/%s?user=%s&password=%s"
+    (or (env :db.postgres.host) "localhost")
+    (or (env :db.postgres.port) "5432")
+    (or (env :db.postgres.name) "cljdbc")
+    (or (env :db.postgres.user) "cljdbc")
+    (or (env :db.postgres.pass) "cljdbc")))
+
 (deftest ^:integration ^:postgres test-postgres
+  (test-connection-pools
+    postgres-jdbc-url
+    [{:hikari {:connectionInitSql "select 1"}}
+     {:tomcat {:initSQL "select 1"}}])
   (prepare-and-run
-    (format "jdbc:postgresql://%s:%s/%s?user=%s&password=%s"
-      (or (env :db.postgres.host) "localhost")
-      (or (env :db.postgres.port) "5432")
-      (or (env :db.postgres.name) "cljdbc")
-      (or (env :db.postgres.user) "cljdbc")
-      (or (env :db.postgres.pass) "cljdbc"))
+    postgres-jdbc-url
     ["DROP TABLE IF EXISTS planet;"
      "CREATE TABLE planet (
       id     SERIAL         PRIMARY KEY,
       system VARCHAR(30)    NOT NULL,
       name   VARCHAR(30)    NOT NULL,
       mass   NUMERIC(38,30) NOT NULL);"]))
+
+
+;; ------------------------------
+;; sqlite
+
+(def sqlite-jdbc-url
+  (format "jdbc:sqlite:test.db"))
+
+(deftest ^:integration ^:sqlite test-postgres
+  (test-connection-pools
+    sqlite-jdbc-url
+    [{:hikari {:connectionInitSql "select 1"}}
+     {:tomcat {:initSQL "select 1"}}])
+  (prepare-and-run
+    sqlite-jdbc-url
+    ["DROP TABLE IF EXISTS planet;"
+     "CREATE TABLE  planet
+      (id             INTEGER PRIMARY KEY AUTOINCREMENT,
+       system         VARCHAR NOT NULL,
+       name           VARCHAR NOT NULL,
+       mass           REAL    NOT NULL);"]))
