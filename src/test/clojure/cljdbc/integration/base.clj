@@ -25,8 +25,8 @@
                          {:system (str "System " i)
                           :name   "Planet"
                           :mass   1})
-                   (range 0 100)))]
-        (dotimes [n 100]
+                   (range 0 5)))]
+        (dotimes [n 5]
           (is (= (+ 1 n)
                  (let [r (nth rs n)]
                    (long (:id r))))))))
@@ -34,11 +34,11 @@
     (testing "query"
       (let [qs (jdbc/parse-statement "select * from planet")
             rs (jdbc/query conn qs)]
-        (is (= 100
+        (is (= 5
                (count rs)))
         (is (= "System 0"
                (-> rs first :system)))
-        (is (= "System 99"
+        (is (= "System 4"
                (-> rs last :system)))))
 
     (testing "update"
@@ -53,7 +53,7 @@
         ;; TODO: better test
         (is rs)
         (is (< 9.99 (-> rs2 first :mass)))
-        (is (= 100 (count rs2)))))
+        (is (= 5 (count rs2)))))
 
     (testing "delete"
       (let [rs (jdbc/delete!
@@ -74,7 +74,7 @@
                          [(str "System " i)
                           "Planet"
                           1])
-                   (range 0 10)))]
+                   (range 0 5)))]
         (is rs)))))
 
 (defn statement-option-test
@@ -207,8 +207,8 @@
                   {:system (str "System " i)
                    :name   "Planet"
                    :mass   1})
-            (range 0 100)))
-        (is (= 100
+            (range 0 5)))
+        (is (= 5
                (->> (jdbc/parse-statement "select * from planet")
                     (jdbc/query conn)
                     (count)))))
@@ -230,7 +230,7 @@
                       {:system (str "System " i)
                        :name   "Planet"
                        :mass   1})
-                (range 0 100)))
+                (range 0 5)))
             ;; This should rollback only the inner transaction (insert)
             (throw (IllegalStateException. "expected")))
           (catch Throwable t

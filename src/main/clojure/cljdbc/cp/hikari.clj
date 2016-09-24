@@ -46,7 +46,7 @@
   [jdbc-url options]
   (let [config (doto (HikariConfig.
                        (reduce
-                         (fn [p [k v]] (.setProperty p k (name v)))
+                         (fn [p [k v]] (.setProperty p (name k) v) p)
                          (Properties.)
                          (dissoc
                            options

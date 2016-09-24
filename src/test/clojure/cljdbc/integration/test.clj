@@ -9,7 +9,20 @@
   [k]
   (let [^String kstr (name k)]
     (or (System/getProperty kstr)
-        (System/getenv (-> kstr (.replaceAll "(\\.|-)" "_") (.toUpperCase))))))
+        (System/getenv
+          (-> kstr
+              (.replaceAll "(\\.|-)" "_")
+              (.toUpperCase))))))
+
+(defn test-connection-pools
+  [jdbc-url pool-opts]
+  (doseq [k pool-opts]
+    (let [ds (jdbc/make-datasource jdbc-url k)]
+      (try
+        (jdbc/with-connection [conn ds]
+          (is true))
+        (finally
+          (jdbc/close ds))))))
 
 (defn prepare-and-run
   [jdbc-url ddl]
@@ -25,14 +38,24 @@
       (finally
         (jdbc/close ds)))))
 
+;; ------------------------------
+;; mysql
+
+(def mysql-jdbc-url
+  (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s&useSSL=false"
+    (or (env :db.mysql.host) "localhost")
+    (or (env :db.mysql.port) "3306")
+    (or (env :db.mysql.name) "cljdbc")
+    (or (env :db.mysql.user) "cljdbc")
+    (or (env :db.mysql.pass) "cljdbc")))
+
 (deftest ^:integration ^:mysql test-mysql
+  (test-connection-pools
+    mysql-jdbc-url
+    [{:hikari {:connectionInitSql "select 1"}}
+     {:tomcat {:initSQL "select 1"}}])
   (prepare-and-run
-    (format "jdbc:mysql://%s:%s/%s?user=%s&password=%s&useSSL=false"
-      (or (env :db.mysql.host) "localhost")
-      (or (env :db.mysql.port) "3306")
-      (or (env :db.mysql.name) "cljdbc")
-      (or (env :db.mysql.user) "cljdbc")
-      (or (env :db.mysql.pass) "cljdbc"))
+    mysql-jdbc-url
     ["DROP TABLE IF EXISTS planet"
      "CREATE TABLE planet (
        id     BIGINT NOT NULL AUTO_INCREMENT,
@@ -41,13 +64,24 @@
        mass   DECIMAL(65,30) NOT NULL,
        PRIMARY KEY (id))"]))
 
+
+;; ------------------------------
+;; oracle
+
+(def oracle-jdbc-url
+  (format "jdbc:oracle:thin:%s/%s@%s:%s:xe"
+    (or (env :db.oracle.user) "cljdbc")
+    (or (env :db.oracle.pass) "cljdbc")
+    (or (env :db.oracle.host) "localhost")
+    (or (env :db.oracle.port) "49161")))
+
 (deftest ^:integration ^:oracle test-oracle
+  (test-connection-pools
+    oracle-jdbc-url
+    [{:hikari {:connectionInitSql "select 1 from dual"}}
+     {:tomcat {:initSQL "select 1 from dual"}}])
   (prepare-and-run
-    (format "jdbc:oracle:thin:%s/%s@%s:%s:xe"
-      (or (env :db.oracle.user) "cljdbc")
-      (or (env :db.oracle.pass) "cljdbc")
-      (or (env :db.oracle.host) "localhost")
-      (or (env :db.oracle.port) "49161"))
+    oracle-jdbc-url
     ["BEGIN
        EXECUTE IMMEDIATE 'DROP TABLE planet CASCADE CONSTRAINTS PURGE';
        EXECUTE IMMEDIATE 'DROP SEQUENCE pk_planet_seq';

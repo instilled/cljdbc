@@ -23,8 +23,11 @@
   '[;; provided
     [com.zaxxer/HikariCP                             "2.4.5"
      :scope "provided"]
+    [org.apache.tomcat/tomcat-jdbc                   "8.5.5"
+     :score "provided"]
     [org.clojure/clojure                             "1.8.0"
      :scope "provided"]
+
     [org.slf4j/slf4j-api                             "1.7.21"
      :scope "provided"]
     [org.apache.logging.log4j/log4j-slf4j-impl       "2.6.2"

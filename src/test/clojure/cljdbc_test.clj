@@ -1,7 +1,7 @@
 (ns cljdbc-test
   (:require
-    [cljdbc :refer :all]
-    [clojure.test     :refer :all]))
+    [cljdbc       :refer :all]
+    [clojure.test :refer :all]))
 
 (deftest test-parse-statement
   (testing "nothing to replace"

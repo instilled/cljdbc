@@ -25,7 +25,6 @@
   []
   (OracleVendor.))
 
-
 ;;(defn default-sequence-name-generator-fn
 ;;  "Generate sequence name base on table name, e.g `table1` as `table1_pk_seq`."
 ;;  [query-spec]

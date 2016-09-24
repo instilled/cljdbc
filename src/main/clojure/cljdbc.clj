@@ -101,7 +101,7 @@
   (close
     [this])
   (get-connection
-    [this options])
+    [this])
   (lift-connection
     [this])
   (get-transaction
@@ -137,8 +137,7 @@
   [^cljdbc.ICljdbcConnectionAware ds sql-vendor active-connection transaction]
   ICljdbcConnection
   (get-connection
-    [this options]
-    ;; TODO: allow nested connections?
+    [this]
     (if active-connection
       this
       (assoc this
@@ -147,7 +146,7 @@
     [this]
     (when-not active-connection
       (throw (IllegalStateException.
-               "Boom! No active connection. Body shuold usually be wrapped in `with-connection`.")))
+               "Boom! No active connection. Body should usually be wrapped in `with-connection`.")))
     active-connection)
   (get-transaction
     [this]
@@ -275,8 +274,8 @@
     (:c3p0 options)
     :c3p0
 
-    (:tomcatPool options)
-    :tomcatPool))
+    (:tomcat options)
+    :tomcat))
 
 (defn load-and-invoke
   [fqfn & args]
@@ -310,13 +309,17 @@
                        (make-default-transaction-strategy)))))
 
 (defn do-transactionally
+  "Transactionally execute `f`. Options map may consist of the keys:
+
+   * isolation
+   * read-only?"
   [conn options f]
   (when-not (satisfies? ICljdbcConnection conn)
     (throw
       (IllegalStateException.
         "Can not start a transaction on non ICljdbcConnection type! See (get-connection).")))
-  (let [conn* (lift-connection conn)
-        transaction (get-transaction conn)]
+  (let [transaction (get-transaction conn)
+        conn*       (lift-connection conn)]
     (try
       (begin! transaction conn* options)
       (let [result (f)]
@@ -646,13 +649,27 @@
 
    An open connection should be used by only one thread concurrently.
 
-   (with-connection [conn conn]
-     ... con-db ...)"
+   (with-connection [conn conn] <optional-options>
+     ... con-db ...)
+
+   `otional-options` may be a map with the following keys:
+
+   * transaction-strategy   An instance of the protocol ITransactionStrategy.
+                            Defaults to `DefaultTransactionStrategy`.
+   * read-only?             If ture commtis will rollback.
+   * isolation              one of :none, :read-committed, :read-uncommitted,
+                            :repeatable-read or :serializable. See
+                            `java.sql.Connection/TRANSACTION_*` constants
+                            for further details.
+
+   Note that `isolation` and `read-only?` flag will be considered only on
+   the outer most transaction, i.e. upon first call to `with-connection`.
+   Subsequent calls with these options will be silently ignored."
   [binding & body-and-or-options]
   (let [conn-var (first binding)
         [options body] (parse-body-and-or-options body-and-or-options)]
     `(let [~conn-var (-> ~(second binding)
-                         (get-connection ~options)
+                         (get-connection)
                          (bind-transaction ~options))]
        (with-open [conn# (lift-connection ~conn-var)]
          (do-transactionally
@@ -660,12 +677,13 @@
            (fn [] ~@body))))))
 
 (defmacro with-connection-binding
-  "Uses `(binding [...] ...)` to establish the connection."
+  "Uses `(binding [...] ...)` to establish the connection. See
+   `with-connection` for thorough doc."
   [binding & body-and-or-options]
   (let [conn-var (first binding)
         [options body] (parse-body-and-or-options body-and-or-options)]
     `(binding [~conn-var (-> ~(second binding)
-                             (get-connection ~options)
+                             (get-connection)
                              (bind-transaction ~options))]
        (with-open [conn# (lift-connection ~conn-var)]
          (do-transactionally
