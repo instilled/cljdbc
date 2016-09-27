@@ -26,6 +26,7 @@
                           :name   "Planet"
                           :mass   1})
                    (range 0 5)))]
+        (is (= 5 (count rs)))
         (dotimes [n 5]
           (is (= (+ 1 n)
                  (let [r (nth rs n)]

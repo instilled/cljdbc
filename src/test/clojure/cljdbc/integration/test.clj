@@ -120,4 +120,14 @@
       id     SERIAL         PRIMARY KEY,
       system VARCHAR(30)    NOT NULL,
       name   VARCHAR(30)    NOT NULL,
-      mass   NUMERIC(38,30) NOT NULL);"]))
+      mass   NUMERIC(20,2)  NOT NULL);"]))
+
+(deftest ^:integration ^:h2 test-h2
+  (prepare-and-run
+    (format "jdbc:h2:mem:cljdbc")
+    ["DROP TABLE IF EXISTS planet;"
+     "CREATE TABLE planet (
+       id     INT PRIMARY KEY AUTO_INCREMENT,
+       system VARCHAR(30)   NOT NULL,
+       name   VARCHAR(30)   NOT NULL,
+       mass   DECIMAL(20,2) NOT NULL);"]))

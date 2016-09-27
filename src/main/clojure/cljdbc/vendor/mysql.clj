@@ -6,7 +6,7 @@
      ResultSet
      PreparedStatement]))
 
-(defrecord MysqlVendor []
+(defrecord MySQLVendor []
   jdbc/ISQLVendor
   (rs-col-name
     [this rs rsmeta i query-spec]
@@ -25,4 +25,4 @@
 
 (defn extension
   []
-  (MysqlVendor.))
+  (MySQLVendor.))

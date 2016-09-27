@@ -16,7 +16,8 @@
 ;; Protos and proto exts
 (def ^:const supported-driver-versions
   {"oracle" {:version [12]}
-   "mysql"  {:version [5]}})
+   "mysql"  {:version [5]}
+   "h2"     {:version [0]}})
 
 (defrecord QuerySpec
   [sql params-idx options meta])
@@ -258,6 +259,8 @@
       this)))
 
 (defn make-default-transaction-strategy
+  "Transaction strategy supporting nested transactions based on savepoints.
+   This will be selected if the database supports savepoints."
   []
   (DefaultTransactionStrategy.
     (volatile!
@@ -713,6 +716,20 @@
       (set-prepared-statement-params! stmt query-spec params)
       (with-open [rs (.executeQuery stmt)]
         (doall (process-result-set rs query-spec sql-vendor))))))
+
+#_(defn query-lazy
+  "Lazily query the database. Takes the same arguments as `query`
+   with an additional argument being a function taking exactly
+   one argument, the open result set. If `query-spec` takes
+   no params pass `nil`. See `query` for details."
+  [conn query-spec params [options-or-fn fn]]
+  (let [[fn options] (if (fn? options-or-fn) [options-or-fn nil] [options-or-fn fn])
+        sql-vendor (sql-vendor conn)
+        query-spec (update query-spec :options merge options)]
+    (with-open-statement [stmt conn] query-spec
+      (set-prepared-statement-params! stmt query-spec params)
+      (with-open [rs (.executeQuery stmt)]
+        (fn (process-result-set rs query-spec sql-vendor))))))
 
 (defn execute!
   "Run a DML query (insert, update, delete) against the dabase.

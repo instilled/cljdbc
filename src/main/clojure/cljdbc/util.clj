@@ -11,7 +11,8 @@
   {"mysql"      "com.mysql.jdbc.Driver"
    "oracle"     "oracle.jdbc.OracleDriver"
    "postgresql" "org.postgresql.Driver"
-   "sqlite"     "org.sqlite.JDBC"})
+   "sqlite"     "org.sqlite.JDBC"
+   "h2"         "org.h2.Driver"})
 
 (defn default-driver-class-for-url
   [jdbc-url]

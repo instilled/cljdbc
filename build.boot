@@ -100,6 +100,15 @@
   (task-options!
     test {:filters #{'(-> % meta :postgres)}}))
 
+(deftask h2
+  "Add h2 to the classpath."
+  []
+  (set-env!
+    :dependencies
+    #(conj % '[com.h2database/h2 "1.4.192"]))
+  (task-options!
+    test {:filters #{'(-> % meta :h2)}}))
+
 (deftask remove-ignored
   []
   (sift
